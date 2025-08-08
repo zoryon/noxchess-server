@@ -1,0 +1,21 @@
+{
+  "name": "lnmchess-server",
+  "version": "0.0.1",
+  "description": "my first socket.io app",
+  "type": "module",
+  "scripts": {
+    "start": "tsc --noEmit && tsx index.ts",
+    "dev": "tsc --noEmit && tsx watch index.ts"
+  },
+  "dependencies": {
+    "@types/node": "^24.2.0",
+    "dotenv": "^17.2.1",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.3"
+  }
+}
