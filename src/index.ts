@@ -4,7 +4,7 @@ import { Server } from "socket.io";
 import dotenv from "dotenv";
 
 import { jwtMiddleware } from "@/auth/jwt-middleware.js";
-import { createMatch } from "./logic/match.js";
+import { createMatch } from "@/logic/match.js";
 
 dotenv.config();
 
@@ -20,7 +20,7 @@ const io = new Server(server, {
 io.use(jwtMiddleware);
 
 io.on("connection", async (socket) => {
-  console.log(`User connected: ${socket.data.user.id}`);
+  console.log(`User connected: ${socket.data.user.userId}`);
 
   await createMatch(io, socket);
 });

@@ -5,7 +5,7 @@ import { addToQueue, findMatchInQueue } from "@/logic/queue.js";
 import { fetchCurrentGameState } from "@/logic/game.js";
 
 export async function createMatch(io: Server, socket: Socket) {
-    const userId = socket.data.user.id;
+    const userId = socket.data.user.userId;
 
     // Try to insert user into queue
     await addToQueue(userId);
@@ -27,7 +27,7 @@ export async function createMatch(io: Server, socket: Socket) {
 
     // Notify both players
     const sockets = await io.fetchSockets();
-    const oppSocket = sockets.find(s => s.data.user.id === result.opponentId);
+    const oppSocket = sockets.find(s => s.data.user.userId === result.opponentId);
 
     if (oppSocket) {
         socket.join(`match:${result.match.id}`);
