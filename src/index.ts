@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 
 import { jwtMiddleware } from "@/auth/jwt-middleware.js";
 import { createMatch } from "@/logic/match.js";
+import { cancelWaitingQueue } from "@/logic/queue.js";
 import { prisma } from "@/lib/prisma.js";
 
 dotenv.config();
@@ -26,11 +27,21 @@ app.get("/health", (_req, res) => {
 io.use(jwtMiddleware);
 
 io.on("connection", async (socket) => {
-  console.log(`User connected: ${socket.data.user.userId}`);
+  const userId = socket.data.user.userId as number;
+  console.log(`User connected: ${userId}`);
+
+  // If this socket disconnects at any point,
+  // cancel its queue entry if it was still WAITING.
+  socket.on("disconnect", async () => {
+    try {
+      await cancelWaitingQueue(userId);
+    } catch (e) {
+      console.warn("failed to cancel waiting queue on disconnect", e);
+    }
+  });
 
   // If the user already has an ongoing match, attach them to it and deploy the handler.
   try {
-    const userId = socket.data.user.userId as number;
     const existing = await prisma.match.findFirst({
       where: { status: "ONGOING", match_player: { some: { userId } } },
       include: { match_player: true, match_piece: true }

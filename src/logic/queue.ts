@@ -8,6 +8,13 @@ export async function addToQueue(userId: number) {
     });
 }
 
+export async function cancelWaitingQueue(userId: number) {
+    await prisma.match_queue.updateMany({
+        where: { userId, status: "WAITING" },
+        data: { status: "CANCELLED" }
+    });
+}
+
 export async function findMatchInQueue(userId: number) {
     return await prisma.$transaction(async (tx) => {
         // Find someone else who is waiting
