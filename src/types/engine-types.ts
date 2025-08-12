@@ -1,4 +1,4 @@
-import { $Enums } from "generated/prisma/index.js";
+import { $Enums } from "@/generated/prisma/index.js";
 import { DbPiece } from "@/types/index.js";
 import { getPhase } from "@/logic/engine/utils.js";
 

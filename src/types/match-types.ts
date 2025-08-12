@@ -1,5 +1,5 @@
 import { JsonValue } from "@prisma/client/runtime/library";
-import { $Enums } from "generated/prisma/index.js";
+import { $Enums } from "@/generated/prisma/index.js";
 
 export type GameState = ({
     match_piece: {

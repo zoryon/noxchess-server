@@ -1,4 +1,4 @@
-import { $Enums, Prisma as PrismaNS } from "generated/prisma/index.js";
+import { $Enums, Prisma as PrismaNS } from "@/generated/prisma/index.js";
 import { prisma } from "@/lib/prisma.js";
 import { PIECES } from "@/constants/index.js";
 import { getDangerousSquare, mergeStatus, removeStatusKeys } from "@/logic/engine/utils.js";

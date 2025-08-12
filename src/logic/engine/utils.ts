@@ -1,4 +1,4 @@
-import { $Enums } from "generated/prisma/index.js";
+import { $Enums } from "@/generated/prisma/index.js";
 import { FullMatch, HandlerContext } from "@/types/engine-types.js";
 import { DbPiece } from "@/types/pieces-types.js";
 

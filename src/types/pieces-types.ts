@@ -1,4 +1,4 @@
-import { $Enums } from "generated/prisma/index.js";
+import { $Enums } from "@/generated/prisma/index.js";
 import { PIECES } from "@/constants/index.js";
 
 export type Ability = {

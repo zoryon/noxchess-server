@@ -1,4 +1,4 @@
-import { PrismaClient } from "../../generated/prisma/index.js";
+import { PrismaClient } from "@/generated/prisma/index.js";
 
 declare global {
     // allow global `prisma` in dev to avoid hot-reload problems
