@@ -1,11 +1,20 @@
-import { Server, Socket } from "socket.io";
+import { DefaultEventsMap, RemoteSocket, Server, Socket } from "socket.io";
 
-import { setupBoard } from "@/logic/setup.js";
+import { GameState } from "@/types/index.js";
 import { addToQueue, findMatchInQueue } from "@/logic/queue.js";
-import { fetchCurrentGameState } from "@/logic/game.js";
+import { setupBoard } from "@/logic/setup.js";
+import { deployGameHandler, fetchCurrentGameStateById } from "@/logic/game.js";
 
-export async function createMatch(io: Server, socket: Socket) {
+type createMatchResult = {
+    gameState: GameState | undefined;
+    opponentId: number;
+    oppSocket: RemoteSocket<DefaultEventsMap, any> | undefined;
+};
+
+export async function createMatch(io: Server, socket: Socket): Promise<createMatchResult> {
     const userId = socket.data.user.userId;
+
+    // Note: reconnect path handled in index.ts before calling createMatch
 
     // Try to insert user into queue
     await addToQueue(userId);
@@ -16,32 +25,26 @@ export async function createMatch(io: Server, socket: Socket) {
     if (!result) {
         // No opponent found, notify client
         socket.emit("match:searching");
-        return;
+        return { gameState: undefined, opponentId: -1, oppSocket: undefined };
     }
 
     // Setup board
-    const pieces = await setupBoard(result.match.id, userId, result.opponentId);
+    await setupBoard(result.match.id, userId, result.opponentId);
 
     // Fetch full game state (match, players, pieces)
-    const gameState = await fetchCurrentGameState(result.match);
+    const gameState = await fetchCurrentGameStateById(result.match.id);
 
-    // Notify both players
+    if (!gameState) {
+        console.warn(`Game state for matchId ${result.match.id} not found.`);
+        return { gameState: undefined, opponentId: -1, oppSocket: undefined };
+    }
+
+    // Get the opponent player
     const sockets = await io.fetchSockets();
     const oppSocket = sockets.find(s => s.data.user.userId === result.opponentId);
 
-    if (oppSocket) {
-        socket.join(`match:${result.match.id}`);
-        oppSocket.join(`match:${result.match.id}`);
+    await deployGameHandler(io, socket, gameState.id);
 
-        io.to(`match:${result.match.id}`).emit("match:start", {
-            ...gameState,
-            pieces
-        });
-    } else {
-        // Opponent disconnected or not found — handle as needed
-        console.warn(`Opponent socket for userId ${result.opponentId} not found.`);
-        // You might want to emit an error or re-queue user here
-        socket.emit("error:opponent_disconnected");
-    }
+    return { gameState, opponentId: result.opponentId, oppSocket };
 }
 
