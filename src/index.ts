@@ -18,6 +18,11 @@ const io = new Server(server, {
   }
 });
 
+// Simple health endpoint for Render/uptime checks
+app.get("/health", (_req, res) => {
+  res.send("OK");
+});
+
 io.use(jwtMiddleware);
 
 io.on("connection", async (socket) => {
@@ -62,6 +67,7 @@ io.on("connection", async (socket) => {
   }
 });
 
-server.listen(process.env.WEBSOCKET_PORT || 3001, () => {
-  console.log(`WS server running on port ${process.env.WEBSOCKET_PORT || 3001}`);
+const port = Number(process.env.WEBSOCKET_PORT ?? 3001);
+server.listen(port, () => {
+  console.log(`WS server running on port ${port}`);
 });
