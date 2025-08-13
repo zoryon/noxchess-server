@@ -52,30 +52,45 @@ io.on("connection", async (socket) => {
       await import("@/logic/game.js").then(({ deployGameHandler }) => deployGameHandler(io, socket, existing.id));
       // Optional hint to the reconnecting client
       socket.emit("match:resume", existing);
-      return; // Skip queueing/matchmaking when resuming
+      // Do not return — allow queue listeners to be registered too (useful after match ends)
     }
   } catch (e) {
     console.warn("match resume check failed", e);
   }
 
-  const { gameState, opponentId, oppSocket } = await createMatch(io, socket);
+  // Queue: only start when client explicitly asks
+  socket.on("match:queue", async () => {
+    try {
+      const { gameState, opponentId, oppSocket } = await createMatch(io, socket);
 
-  if (!gameState) {
-    socket.emit("error:match_not_found");
-    return;
-  }
+      // If no opponent was found yet, the createMatch flow already emitted
+      // "match:searching" to this socket. Do not emit an error here —
+      // keep the client in a waiting state until a match is made.
+      if (!gameState) return;
 
-  if (oppSocket) {
-    socket.join(`match:${gameState.id}`);
-    oppSocket.join(`match:${gameState.id}`);
+      if (oppSocket) {
+        socket.join(`match:${gameState.id}`);
+        oppSocket.join(`match:${gameState.id}`);
+        io.to(`match:${gameState.id}`).emit("match:start", gameState);
+      } else {
+        console.warn(`Opponent socket for userId ${opponentId} not found.`);
+        socket.emit("error:opponent_disconnected");
+      }
+    } catch (e) {
+      console.warn("match queue failed", e);
+      socket.emit("error:match_queue_failed");
+    }
+  });
 
-    io.to(`match:${gameState.id}`).emit("match:start", gameState);
-  } else {
-    // Opponent disconnected or not found — handle as needed
-    console.warn(`Opponent socket for userId ${opponentId} not found.`);
-    // You might want to emit an error or re-queue user here
-    socket.emit("error:opponent_disconnected");
-  }
+  // Allow client to cancel waiting state explicitly
+  socket.on("match:cancel", async () => {
+    try {
+      await cancelWaitingQueue(userId);
+      socket.emit("match:cancelled");
+    } catch (e) {
+      console.warn("failed to cancel queue by request", e);
+    }
+  });
 });
 
 const port = Number(process.env.WEBSOCKET_PORT ?? 3001);
