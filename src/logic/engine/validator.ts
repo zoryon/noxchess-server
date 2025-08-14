@@ -67,7 +67,7 @@ export function canMoveLike(
             const startRow = color === "WHITE" ? 1 : 6;
             if (dx === 0 && fromY === startRow && dy === 2 * dir && ctx.board[fromY + dir][fromX] === null && ctx.board[toY][toX] === null) return true;
             // capture diagonally
-            if (ady === 1 && dy === dir) {
+            if (adx === 1 && dy === dir) { 
                 const targetId = ctx.board[toY][toX];
                 if (targetId !== null) {
                     const tp = ctx.piecesById.get(targetId)!;
