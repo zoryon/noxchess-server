@@ -387,6 +387,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     // DB transaction: move piece (or castle), capture, increment turn, create move record, adjust DE on capture
     const isCapture = targetId != null;
     let needExtraStep = false; // For Unstable Form (Doppelgänger)
+    let promotionPending = false;
     // If Unstable Form is pending, only that Doppelgänger may move to finish it.
     const pendingUnstable = (() => {
         for (const p of ctx.piecesById.values()) {
@@ -497,6 +498,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 if (to.y === lastRank) {
                     const ps = mergeStatus(piece.status || {}, { promotionPending: true });
                     await tx.match_piece.update({ where: { id: piece.id }, data: { status: ps as any } });
+                    promotionPending = true;
                 }
             }
 
@@ -520,7 +522,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
         }
 
         // End-of-turn updates if not requiring extra step
-        if (!needExtraStep) {
+        if (!needExtraStep && !promotionPending) {
             // Decrement speed limit counters if applied and this piece just moved under limit
             if (speedLimitRemaining > 0) {
                 const nextRemain = Math.max(0, speedLimitRemaining - 1);
@@ -548,7 +550,8 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 ? { pieceId: piece.id, from, to: { x: castle.kingToX, y: from.y }, isCapture: false, castle: { rookId: castle.rookId, rookToX: castle.rookToX } }
                 : { pieceId: piece.id, from, to, isCapture },
             extraStepRequired: needExtraStep ? { pieceId: piece.id } : undefined,
-            nextTurn: ctx.match.turn + (needExtraStep ? 0 : 1)
+            promotionRequired: promotionPending ? { pieceId: piece.id } : undefined,
+            nextTurn: ctx.match.turn + (needExtraStep || promotionPending ? 0 : 1)
         }
     };
 }
