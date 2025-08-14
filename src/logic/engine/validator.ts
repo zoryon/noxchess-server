@@ -237,12 +237,17 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     if (from.x !== piece.posX || from.y !== piece.posY) return { ok: false, error: "mismatch_from" };
     if (!isInside(to.x, to.y)) return { ok: false, error: "out_of_bounds" };
 
+    // Unstable Form follow-up: if this Doppelgänger owes an extra step this turn, that step must be exactly one diagonal square.
+    const isUnstableFollowup = piece.type === "DOPPELGANGER" && (((piece.status ?? {}) as any).unstablePendingTurn === ctx.match.turn);
+
     // cannot capture own piece
     const targetId = ctx.board[to.y][to.x];
     if (targetId) {
         const tp = ctx.piecesById.get(targetId)!;
         const tColor = ctx.match.match_player.find(mp => mp.userId === tp.playerId)!.color;
         if (tColor === ctx.currentColor) return { ok: false, error: "cannot_capture_ally" };
+        // During the forced Unstable step, cannot capture the enemy king
+        if (isUnstableFollowup && tp.type === "SLEEPLESS_EYE") return { ok: false, error: "cannot_capture_king" };
     // Camouflage: a Shadow Hunter may be temporarily uncapturable if camouflaged (longer during CHAOS).
         const tStatus: any = tp.status ?? {};
         const camoUntil: number | undefined = tStatus.camouflagedUntilTurn;
@@ -257,6 +262,8 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     if (piece.type === "DOPPELGANGER" && mimicStatus.mimic && mimicStatus.mimicTurn === ctx.match.turn) {
         override = mimicStatus.mimic as MovementKind;
     }
+
+    // (moved above for scoping before use)
 
     // Special case: castling like normal chess
     function tryCastle(mPiece: DbPiece) {
@@ -311,9 +318,8 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     }
 
     const castle = tryCastle(piece);
-    // Speed-limit (Funeral Wail): when active, only a 1-square king-like step is allowed.
+    // Funeral Wail speed-limit no longer applies; replaced with DE drain mechanic.
     const pStatus: any = piece.status ?? {};
-    const speedLimitRemaining: number = pStatus.speedLimitOneRemaining ?? 0;
 
     // Creeping Shadows: once during SHADOWS phase, non-king/non-pawn may step 1 diagonal into an empty square.
     let creepingShadowsStep = false;
@@ -327,13 +333,16 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             creepingShadowsStep = true;
         }
     }
-    if (speedLimitRemaining > 0) {
+    // Note: no move restriction here anymore.
+    if (isUnstableFollowup) {
+        // Only allow a single diagonal step; destination can be empty or capture an enemy (ally capture blocked earlier).
         const adx = Math.abs(to.x - from.x), ady = Math.abs(to.y - from.y);
-        if (!(adx <= 1 && ady <= 1 && !(adx === 0 && ady === 0))) return { ok: false, error: "speed_limited_to_one" };
-        // Disallow castling under speed limit
-        if (castle) return { ok: false, error: "speed_limited_to_one" };
+        if (!(adx === 1 && ady === 1)) return { ok: false, error: "unstable_must_step_diagonal" };
+        // Disallow castling in any case (not applicable to Doppelgänger, but for completeness)
+        if (castle) return { ok: false, error: "unstable_must_step_diagonal" };
+    } else {
+        if (!canMoveLike(ctx, piece, from.x, from.y, to.x, to.y, override) && !castle && !creepingShadowsStep) return { ok: false, error: "illegal_move" };
     }
-    if (!canMoveLike(ctx, piece, from.x, from.y, to.x, to.y, override) && !castle && !creepingShadowsStep && speedLimitRemaining === 0) return { ok: false, error: "illegal_move" };
 
     // Mental Echo: if echo is pending, this move must match a pre-declared from/to for this turn.
     const echoSt: any = piece.status ?? {};
@@ -407,12 +416,11 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             // +2 DE for capture.
             await addDETx(tx, ctx, 2);
 
-            // Funeral Wail: capturing the Phantom Matriarch applies a speed limit to the captor (N=2, CHAOS: 4).
+            // Funeral Wail: capturing the Phantom Matriarch now applies a 3-turn start-of-turn DE drain to the captor.
             const capturedType = ctx.piecesById.get(targetId!)?.type;
             if (capturedType === "PHANTOM_MATRIARCH") {
                 const current = (piece.status ?? {}) as any;
-                const remain = (ctx.phase === "CHAOS") ? 4 : 2;
-                const newStatus = mergeStatus(current, { speedLimitOneRemaining: remain });
+                const newStatus = mergeStatus(current, { wailDrainRemaining: 3 });
                 await tx.match_piece.update({ where: { id: piece.id }, data: { status: newStatus as any } });
             }
 
@@ -483,12 +491,48 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
 
             await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: isCapture ? ctx.piecesById.get(targetId!)?.type ?? null : null, specialAbilityUsed: 0 });
 
-            // Unstable Form: after a Doppelgänger captures, it must make one extra move this turn.
-            if (piece.type === "DOPPELGANGER" && isCapture && !pendingUnstable) {
-                const cur = (piece.status ?? {}) as any;
-                const st2 = mergeStatus(cur, { unstablePendingTurn: ctx.match.turn });
-                await tx.match_piece.update({ where: { id: piece.id }, data: { status: st2 as any } });
-                needExtraStep = true;
+            // Unstable Form: after any Doppelgänger move, it must make one extra diagonal step this turn,
+            // unless no legal such step exists (including: cannot capture enemy king, and king-safety must hold).
+            if (piece.type === "DOPPELGANGER" && !pendingUnstable) {
+                // Build post-move board/pieces
+                const boardAfter = cloneBoard(ctx.board);
+                boardAfter[from.y][from.x] = null;
+                if (isCapture && targetId != null) boardAfter[to.y][to.x] = null;
+                boardAfter[to.y][to.x] = piece.id;
+                const piecesAfter = new Map<number, DbPiece>();
+                for (const [id, p] of ctx.piecesById.entries()) {
+                    if (id === piece.id) {
+                        piecesAfter.set(id, { ...p, posX: to.x, posY: to.y } as DbPiece);
+                    } else if (id === targetId) {
+                        piecesAfter.set(id, { ...p, captured: 1, posX: null, posY: null } as DbPiece);
+                    } else {
+                        piecesAfter.set(id, p);
+                    }
+                }
+                const myColor = getPieceColor(ctx, piece);
+                const dirs = [[1,1],[1,-1],[-1,1],[-1,-1]] as const;
+                let hasLegalFollowup = false;
+                for (const [dx, dy] of dirs) {
+                    const nx = to.x + dx, ny = to.y + dy;
+                    if (!isInside(nx, ny)) continue;
+                    const at = boardAfter[ny][nx];
+                    if (at != null) {
+                        const tp2 = piecesAfter.get(at)!;
+                        const tColor2 = getPieceColor(ctx, tp2);
+                        if (tColor2 === myColor) continue; // cannot capture ally
+                        if (tp2.type === "SLEEPLESS_EYE") continue; // cannot capture enemy king during forced step
+                    }
+                    // King safety check for this hypothetical extra step
+                    const pieceAfter = piecesAfter.get(piece.id)!;
+                    const leaves = leavesOwnKingInCheck({ ...ctx, board: boardAfter, piecesById: piecesAfter } as any, pieceAfter, to.x, to.y, nx, ny, at ?? undefined);
+                    if (!leaves) { hasLegalFollowup = true; break; }
+                }
+                if (hasLegalFollowup) {
+                    const cur = (piece.status ?? {}) as any;
+                    const st2 = mergeStatus(cur, { unstablePendingTurn: ctx.match.turn });
+                    await tx.match_piece.update({ where: { id: piece.id }, data: { status: st2 as any } });
+                    needExtraStep = true;
+                }
             }
 
             // Corrupted Promotion: when a Larva reaches the last rank, mark promotionPending.
@@ -521,13 +565,9 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             }
         }
 
-        // End-of-turn updates if not requiring extra step
-        if (!needExtraStep && !promotionPending) {
-            // Decrement speed limit counters if applied and this piece just moved under limit
-            if (speedLimitRemaining > 0) {
-                const nextRemain = Math.max(0, speedLimitRemaining - 1);
-                await tx.match_piece.update({ where: { id: piece.id }, data: { status: mergeStatus(pStatus, { speedLimitOneRemaining: nextRemain }) as any } });
-            }
+    // End-of-turn updates if not requiring extra step
+    if (!needExtraStep && !promotionPending) {
+            // No speed-limit decrement anymore.
 
             // Camouflage: Hunters that didn't move this turn become camouflaged until the opponent's next (CHAOS: +2 turns).
             const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
@@ -537,6 +577,13 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
                 const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
                 await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+            }
+
+            // If this was the forced Unstable follow-up for a Doppelgänger, clear the flag now and end the turn
+            if (isUnstableFollowup && piece.type === "DOPPELGANGER") {
+                const cur = (await tx.match_piece.findUnique({ where: { id: piece.id } }))?.status ?? {};
+                const cleared = removeStatusKeys(cur, ["unstablePendingTurn"]) as any;
+                await tx.match_piece.update({ where: { id: piece.id }, data: { status: cleared } });
             }
 
             await incTurnTx(tx, ctx);

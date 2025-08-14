@@ -38,8 +38,8 @@ export const PIECES: Record<string, PieceType> = {
         passiveAbility: {
             name: "Funeral Wail",
             trigger: "passive",
-            description: "On capture, captor can move only 1 square for 2 turns",
-            // Implemented in engine/validator.ts: add speedLimitOneRemaining to the captor
+                description: "On capture, captor loses 1 Dream Energy at the start of its turn for 3 turns",
+            // Implemented via wailDrainRemaining status + per-turn drain in engine/tx-helpers.ts
             effect: () => {}
         }
     },
@@ -80,7 +80,7 @@ export const PIECES: Record<string, PieceType> = {
         passiveAbility: {
             name: "Unstable Form",
             trigger: "passive",
-            description: "After capturing, must immediately move 1 additional legal square if possible",
+            description: "After capturing, must immediately move 1 additional legal square if possible (cannot capture the enemy's sleepless eye)",
             // Implemented in engine/validator.ts: require an immediate extra step after a capture
             effect: () => {}
         }

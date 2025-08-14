@@ -188,6 +188,8 @@ async function etherealPassage(ctx: HandlerContext, pieceId: number, attempt: Ab
     const targetId = ctx.board[to.y][to.x];
     if (targetId !== null) return { ok: false, error: "must_land_on_empty" } as const;
 
+    // Funeral Wail (new): no move restriction here; effect handled at start of turn.
+
     // Commit: spend DE, move piece, increment usedAbility, mark hasMoved, log ABILITY, and end turn.
     const cost = def.activeAbility?.cost ?? 0;
     // Self-check guard: result cannot leave our king in check.
@@ -200,7 +202,7 @@ async function etherealPassage(ctx: HandlerContext, pieceId: number, attempt: Ab
     pieces2.set(piece.id, { ...piece, posX: to.x, posY: to.y } as any);
     if (isInCheck(ctx, myColor, board2, pieces2)) return { ok: false, error: "king_in_check" } as const;
     await prisma.$transaction(async (tx) => {
-    await chargeDETx(tx, ctx, cost);
+        await chargeDETx(tx, ctx, cost);
     await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, usedAbility: (used + 1), status: mergeStatus(piece.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn }) as any } });
         await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: null, specialAbilityUsed: 1 });
         await incTurnTx(tx, ctx);
@@ -349,6 +351,8 @@ async function terrorLeap(ctx: HandlerContext, pieceId: number, attempt: Ability
     const isLongL = (dx === 3 && dy === 2) || (dx === 2 && dy === 3);
     if (!isLongL) return { ok: false, error: "illegal_destination" } as const;
 
+    // Funeral Wail (new): no ability restriction; effect handled at start of turn.
+
     // Destination handling: allow capturing enemies; forbid landing on allies.
     const destId = ctx.board[to.y][to.x];
     if (destId !== null) {
@@ -383,10 +387,17 @@ async function terrorLeap(ctx: HandlerContext, pieceId: number, attempt: Ability
             await tx.match_piece.update({ where: { id: destId! }, data: { captured: 1, posX: null, posY: null } });
             // +2 DE for capture per global rule
             await addDETx(tx, ctx, 2);
+            // Apply Funeral Wail debuff if captured piece was Phantom Matriarch (3 start-of-turn drains)
+            const capturedType = ctx.piecesById.get(destId!)?.type;
+            if (capturedType === "PHANTOM_MATRIARCH") {
+                const cur = (await tx.match_piece.findUnique({ where: { id: piece.id } }))?.status ?? {};
+                const next = mergeStatus(cur, { wailDrainRemaining: 3 });
+                await tx.match_piece.update({ where: { id: piece.id }, data: { status: next as any } });
+            }
         }
 
     // Move and increment used ability; mark hasMoved, log ABILITY, end turn.
-    await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, usedAbility: (used + 1), status: mergeStatus(piece.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn }) as any } });
+    await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, usedAbility: (used + 1), status: mergeStatus((await tx.match_piece.findUnique({ where: { id: piece.id } }))?.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn }) as any } });
 
     await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: isCapture ? ctx.piecesById.get(destId!)?.type ?? null : null, specialAbilityUsed: 1 });
 
