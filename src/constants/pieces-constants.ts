@@ -80,7 +80,7 @@ export const PIECES: Record<string, PieceType> = {
         passiveAbility: {
             name: "Unstable Form",
             trigger: "passive",
-            description: "If possible, immediately move 1 additional legal square (cannot capture the enemy's sleepless eye)",
+            description: "If possible, immediately move 1 additional legal square (can only capture Larvas or Doppelgangers)",
             // Implemented in engine/validator.ts: require an immediate extra step after
             effect: () => {}
         }
@@ -122,7 +122,7 @@ export const PIECES: Record<string, PieceType> = {
         passiveAbility: {
             name: "Psychic Gateway",
             trigger: "passive",
-            description: "When two Larvas are aligned diagonally with exactly one empty square between them, that square becomes a 'psychic gateway'. Any friendly piece moving into it may immediately move again as if it had just started its turn.",
+            description: "When two Larvas are aligned diagonally with exactly one empty square between them, that square becomes a 'psychic gateway'. Any friendly piece moving into it may immediately move again (can only capture Larvas).",
             // TODO: Implement in engine/validator.ts: detect friendly diagonal Larva pair -> mark middle square; on landing there, allow an optional immediate extra move with the same piece.
             effect: () => {}
         }
