@@ -223,6 +223,20 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     if (piece.captured) return { ok: false, error: "piece_captured" };
     if (piece.posX == null || piece.posY == null) return { ok: false, error: "piece_offboard" };
 
+    // If any of our pieces has a pending Psychic Gateway follow-up this turn, enforce that the same piece must move next.
+    const gatewayPendingForUs = (() => {
+        for (const p of ctx.piecesById.values()) {
+            if (p.captured) continue;
+            if (getPieceColor(ctx, p) !== ctx.currentColor) continue;
+            const st: any = p.status ?? {};
+            if (st.gatewayPendingTurn === ctx.match.turn) return p.id;
+        }
+        return null;
+    })();
+    if (gatewayPendingForUs && gatewayPendingForUs !== attempt.pieceId) {
+        return { ok: false, error: "must_complete_psychic_gateway" };
+    }
+
     // status: immobilized for this turn (e.g., Shadow Bind)
     const pieceStatus = (piece.status ?? {}) as any;
     if (pieceStatus.immobilizedOnTurn === ctx.match.turn) {
@@ -239,6 +253,8 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
 
     // Unstable Form follow-up: if this Doppelgänger owes an extra step this turn, that step must be exactly one diagonal square.
     const isUnstableFollowup = piece.type === "DOPPELGANGER" && (((piece.status ?? {}) as any).unstablePendingTurn === ctx.match.turn);
+    // Psychic Gateway follow-up: if this piece landed on a gateway square previously this turn, it may move again immediately (any legal move).
+    const isGatewayFollowup = ((piece.status ?? {}) as any).gatewayPendingTurn === ctx.match.turn;
 
     // cannot capture own piece
     const targetId = ctx.board[to.y][to.x];
@@ -438,6 +454,27 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     if (pendingUnstable && pendingUnstable !== piece.id) {
         return { ok: false, error: "must_complete_unstable_form" };
     }
+    // Psychic Gateway: determine before mutating board
+    const squareWasEmpty = ctx.board[to.y][to.x] === null;
+    const myColorPG = pieceColor(ctx, piece);
+    function isFriendlyLarvaAt(x: number, y: number, color: $Enums.match_player_color) {
+        if (!isInside(x, y)) return false;
+        const id = ctx.board[y][x];
+        if (id == null) return false;
+        const p = ctx.piecesById.get(id)!;
+        if (p.captured || p.type !== "PSYCHIC_LARVA") return false;
+        return getPieceColor(ctx, p) === color;
+    }
+    function isGatewaySquareForColor(x: number, y: number, color: $Enums.match_player_color) {
+        // require the square to be empty before landing to count as a gateway
+        if (ctx.board[y][x] != null) return false;
+        // diags: (x-1,y-1) & (x+1,y+1) or (x-1,y+1) & (x+1,y-1)
+        const a1 = isFriendlyLarvaAt(x - 1, y - 1, color) && isFriendlyLarvaAt(x + 1, y + 1, color);
+        const a2 = isFriendlyLarvaAt(x - 1, y + 1, color) && isFriendlyLarvaAt(x + 1, y - 1, color);
+        return a1 || a2;
+    }
+    const triggersGateway = !castle && squareWasEmpty && isGatewaySquareForColor(to.x, to.y, myColorPG) && !isUnstableFollowup && !isGatewayFollowup;
+
     await prisma.$transaction(async (tx) => {
         // Charge DE for Fearful Terrain if applicable
         if (fearfulTerrainTriggered && fearfulTerrainCost > 0) {
@@ -510,7 +547,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 const clearedEcho = removeStatusKeys(kingStatus, ["echoPendingFromTurn", "echoPendingTurns", "echoDeclaredForTurn", "echoDeclFromX", "echoDeclFromY", "echoDeclToX", "echoDeclToY"]) as any;
                 await tx.match_piece.update({ where: { id: piece.id }, data: { status: clearedEcho } });
             }
-        } else {
+    } else {
             // Clear mimic after use and mark hasMoved
             if (piece.type === "DOPPELGANGER" && override) {
                 const cleared = removeStatusKeys(mimicStatus || {}, ["mimic", "mimicTurn"]) as any;
@@ -567,6 +604,14 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 }
             }
 
+            // Psychic Gateway: if this piece just landed on a gateway square, allow an immediate extra move (optional in design, required in engine flow).
+            if (triggersGateway && !needExtraStep) {
+                const cur = (piece.status ?? {}) as any;
+                const st2 = mergeStatus(cur, { gatewayPendingTurn: ctx.match.turn });
+                await tx.match_piece.update({ where: { id: piece.id }, data: { status: st2 as any } });
+                needExtraStep = true;
+            }
+
             // Corrupted Promotion: when a Larva reaches the last rank, mark promotionPending.
             if (piece.type === "PSYCHIC_LARVA") {
                 const myColor = getPieceColor(ctx, piece);
@@ -616,6 +661,12 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 const cur = (await tx.match_piece.findUnique({ where: { id: piece.id } }))?.status ?? {};
                 const cleared = removeStatusKeys(cur, ["unstablePendingTurn"]) as any;
                 await tx.match_piece.update({ where: { id: piece.id }, data: { status: cleared } });
+            }
+            // Clear Psychic Gateway pending if this was the follow-up move
+            if (isGatewayFollowup) {
+                const cur2 = (await tx.match_piece.findUnique({ where: { id: piece.id } }))?.status ?? {};
+                const cleared2 = removeStatusKeys(cur2, ["gatewayPendingTurn"]) as any;
+                await tx.match_piece.update({ where: { id: piece.id }, data: { status: cleared2 } });
             }
 
             await incTurnTx(tx, ctx);

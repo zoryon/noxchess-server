@@ -120,10 +120,10 @@ export const PIECES: Record<string, PieceType> = {
             effect: () => {}
         },
         passiveAbility: {
-            name: "Mental Echo",
+            name: "Psychic Gateway",
             trigger: "passive",
-            description: "When captured, the captor must declare its next intended move (if it plans to move that piece) at the start of its turn.",
-            // Implemented across engine/validator.ts and socket in game.ts via echo:declare
+            description: "When two Larvas are aligned diagonally with exactly one empty square between them, that square becomes a 'psychic gateway'. Any friendly piece moving into it may immediately move again as if it had just started its turn.",
+            // TODO: Implement in engine/validator.ts: detect friendly diagonal Larva pair -> mark middle square; on landing there, allow an optional immediate extra move with the same piece.
             effect: () => {}
         }
     },
