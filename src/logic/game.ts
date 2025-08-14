@@ -96,7 +96,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
             if (timeLeft <= 0) {
                 const winner = match.match_player.find((p: any) => p.color !== currentColor);
                 await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
-                io.to(room).emit("match:finished", { winnerId: winner?.userId ?? null, reason: "time" });
+                io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "time" });
                 ack?.({ ok: false, error: "time_forfeit" });
                 return;
             }
@@ -120,10 +120,10 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                         const winnerColor = end.winnerColor;
                         const winner = updated.match_player.find((p: any) => p.color === winnerColor);
                         await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
-                        io.to(room).emit("match:finished", { winnerId: winner?.userId ?? null, reason: "checkmate" });
+                        io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "checkmate" });
                     } else if (end.outcome === "stalemate") {
                         await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: null } });
-                        io.to(room).emit("match:finished", { winnerId: null, reason: "stalemate" });
+                        io.to(room).emit("match:finished", { matchId, winnerId: null, reason: "stalemate" });
                     }
                 }
             }
@@ -147,7 +147,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
             if (timeLeft <= 0) {
                 const winner = match.match_player.find((p: any) => p.color !== currentColor);
                 await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
-                io.to(room).emit("match:finished", { winnerId: winner?.userId ?? null, reason: "time" });
+                io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "time" });
                 ack?.({ ok: false, error: "time_forfeit" });
                 return;
             }
@@ -170,10 +170,10 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                             const winnerColor = end.winnerColor;
                             const winner = updated.match_player.find((p: any) => p.color === winnerColor);
                             await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
-                            io.to(room).emit("match:finished", { winnerId: winner?.userId ?? null, reason: "checkmate" });
+                            io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "checkmate" });
                         } else if (end.outcome === "stalemate") {
                             await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: null } });
-                            io.to(room).emit("match:finished", { winnerId: null, reason: "stalemate" });
+                            io.to(room).emit("match:finished", { matchId, winnerId: null, reason: "stalemate" });
                         }
                     }
                 }
@@ -246,10 +246,10 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                     if (end.outcome === "checkmate") {
                         const winner = updated.match_player.find((p: any) => p.color === (updated.turn % 2 === 1 ? "WHITE" : "BLACK"));
                         await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
-                        io.to(room).emit("match:finished", { winnerId: winner?.userId ?? null, reason: "checkmate" });
+                        io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "checkmate" });
                     } else if (end.outcome === "stalemate") {
                         await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: null } });
-                        io.to(room).emit("match:finished", { winnerId: null, reason: "stalemate" });
+                        io.to(room).emit("match:finished", { matchId, winnerId: null, reason: "stalemate" });
                     }
                 }
             }
@@ -301,7 +301,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                 data: { status: "FINISHED", winnerId: opponent?.userId ?? null }
             });
 
-            io.to(room).emit("match:finished", { winnerId: opponent?.userId ?? null, reason: "resign" });
+            io.to(room).emit("match:finished", { matchId, winnerId: opponent?.userId ?? null, reason: "resign" });
             ack?.({ ok: true });
         } catch (e: any) {
             ack?.({ ok: false, error: e.message || "unknown_error" });
@@ -332,7 +332,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                 const loser = match.match_player.find(p => p.userId === userId);
                 const winner = match.match_player.find(p => p.userId !== userId);
                 await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
-                io.to(room).emit("match:finished", { winnerId: winner?.userId ?? null, reason: "disconnect" });
+                io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "disconnect" });
             } catch (e) {
                 // ignore
             } finally {
