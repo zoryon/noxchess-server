@@ -18,13 +18,90 @@ export async function fetchCurrentGameStateById(matchId: number) {
 export async function deployGameHandler(io: Server, socket: Socket, matchId: number) {
     const room = `match:${matchId}`;
     // Ensure this socket joins the match room
-    try { socket.join(room); } catch {}
+    try { socket.join(room); } catch { }
     // In-memory disconnect timers per (matchId:userId)
     // Note: This resets on server restart; good enough for 1-minute grace.
     const keyFor = (u: number) => `${matchId}:${u}`;
     const globalAny: any = global as any;
     if (!globalAny.__lnm_disconnectTimers) globalAny.__lnm_disconnectTimers = new Map<string, NodeJS.Timeout>();
     const timers: Map<string, NodeJS.Timeout> = globalAny.__lnm_disconnectTimers;
+
+    // Per-turn idle timers (one per match) and idle counters per player
+    if (!globalAny.__lnm_turnTimers) globalAny.__lnm_turnTimers = new Map<number, NodeJS.Timeout>();
+    if (!globalAny.__lnm_idleCounts) globalAny.__lnm_idleCounts = new Map<string, number>();
+    const turnTimers: Map<number, NodeJS.Timeout> = globalAny.__lnm_turnTimers;
+    const idleCounts: Map<string, number> = globalAny.__lnm_idleCounts;
+
+    // Schedule/refresh a 3-minute idle timer for the current player to move. If they do nothing, auto-idle.
+    async function scheduleTurnTimer(matchObj?: any) {
+        const match = matchObj ?? (await fetchCurrentGameStateById(matchId));
+        if (!match) return;
+        if (match.status === "FINISHED") {
+            const prev = turnTimers.get(matchId);
+            if (prev) { clearTimeout(prev); turnTimers.delete(matchId); }
+            return;
+        }
+        const expectedTurn = match.turn;
+        const currentColor = expectedTurn % 2 === 1 ? "WHITE" : "BLACK";
+        const currentPlayer = match.match_player.find((p: any) => p.color === currentColor);
+        if (!currentPlayer) return;
+
+        // Clear existing timer for this match
+        const existing = turnTimers.get(matchId);
+        if (existing) clearTimeout(existing);
+
+        const t = setTimeout(async () => {
+            try {
+                const latest = await fetchCurrentGameStateById(matchId);
+                if (!latest || latest.status === "FINISHED") return;
+                // If turn changed since scheduling, do nothing
+                if (latest.turn !== expectedTurn) return;
+
+                const nowColor = latest.turn % 2 === 1 ? "WHITE" : "BLACK";
+                const nowPlayer = latest.match_player.find((p: any) => p.color === nowColor);
+                if (!nowPlayer) return;
+
+                const countKey = keyFor(nowPlayer.userId ?? -1);
+                const prevCount = idleCounts.get(countKey) ?? 0;
+                const nextCount = prevCount + 1;
+
+                if (nextCount >= 2) {
+                    // Forfeit by idle
+                    const winner = latest.match_player.find((p: any) => p.userId !== nowPlayer.userId);
+                    await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
+                    io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "idle" });
+                    idleCounts.set(countKey, nextCount);
+                    return;
+                }
+
+                // Auto-idle: end the turn without DE gain and log an "IDLE" move
+                const ctx = buildHandlerContext(latest);
+                await prisma.$transaction(async (tx) => {
+                    // Clear any pending extra-step flags tied to this exact turn for the idling player
+                    const pieces = await tx.match_piece.findMany({ where: { matchId, playerId: nowPlayer.userId, captured: 0 } });
+                    for (const p of pieces) {
+                        const st: any = p.status ?? {};
+                        let changed = false;
+                        if (st.unstablePendingTurn === expectedTurn) { delete st.unstablePendingTurn; changed = true; }
+                        if (st.gatewayPendingTurn === expectedTurn) { delete st.gatewayPendingTurn; changed = true; }
+                        if (changed) {
+                            await tx.match_piece.update({ where: { id: p.id }, data: { status: st as any } });
+                        }
+                    }
+                    await tx.match.update({ where: { id: matchId }, data: { turn: { increment: 1 } } });
+                    await logMoveTx(tx, { ...ctx, me: nowPlayer } as any, { fromX: -1, fromY: -1, toX: -1, toY: -1, pieceType: "IDLE", specialAbilityUsed: 0, moveType: "MEDITATE" });
+                });
+                idleCounts.set(countKey, nextCount);
+                io.to(room).emit("turn:idled", { userId: nowPlayer.userId, count: nextCount });
+                await emitState();
+            } catch (e) {
+                // swallow
+            } finally {
+                turnTimers.delete(matchId);
+            }
+        }, 180_000);
+        turnTimers.set(matchId, t);
+    }
 
     async function computeClocks(match: any) {
         // 10 minutes per side in ms
@@ -65,8 +142,10 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
         if (!match) return;
         const phase = getPhase(match.turn);
         const clocks = await computeClocks(match);
-    const danger = phase === "UNSTABLE" ? getDangerousSquare(match.id, match.turn) : null;
-    io.to(room).emit("match:update", { match, phase, clocks, dangerousSquare: danger });
+        const danger = phase === "UNSTABLE" ? getDangerousSquare(match.id, match.turn) : null;
+        io.to(room).emit("match:update", { match, phase, clocks, dangerousSquare: danger });
+        // (Re)schedule the 3-minute per-turn idle timer for the current player
+        await scheduleTurnTimer(match);
     }
 
     // Initial state sync for the connecting socket
@@ -81,7 +160,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
             clearTimeout(t);
             timers.delete(k);
         }
-    } catch {}
+    } catch { }
 
     // Attempt a standard move
     socket.on("move:attempt", async (payload, ack?: (res: any) => void) => {
@@ -207,7 +286,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
         }
     });
 
-    // Meditate action (+1 DE, not allowed in check)
+    // Meditate action (+8 DE, not allowed in check). Ends the turn immediately with no moves.
     socket.on("turn:meditate", async (_payload, ack?: (res: any) => void) => {
         try {
             const match = await fetchCurrentGameStateById(matchId);
@@ -227,7 +306,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
             await prisma.$transaction(async (tx) => {
                 await tx.match_player.update({
                     where: { id: player.id },
-                    data: { dreamEnergy: { increment: 1 } }
+                    data: { dreamEnergy: { increment: 8 } }
                 });
                 await tx.match.update({
                     where: { id: matchId },
@@ -280,10 +359,10 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
     });
 
     socket.on("match:state:request", async (_payload, ack?: (res: any) => void) => {
-    const match = await fetchCurrentGameStateById(matchId);
-    const phase = match ? getPhase(match.turn) : null;
-    const clocks = match ? await computeClocks(match) : null;
-    const danger = match && phase === "UNSTABLE" ? getDangerousSquare(match.id, match.turn) : null;
+        const match = await fetchCurrentGameStateById(matchId);
+        const phase = match ? getPhase(match.turn) : null;
+        const clocks = match ? await computeClocks(match) : null;
+        const danger = match && phase === "UNSTABLE" ? getDangerousSquare(match.id, match.turn) : null;
         ack?.({ ok: true, match, phase, clocks, dangerousSquare: danger });
     });
 
@@ -318,7 +397,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
             const socketsNow = await io.in(room).fetchSockets();
             const stillHereNow = socketsNow.some(s => s.data?.user?.userId === userId && s.id !== socket.id);
             if (stillHereNow) return;
-        } catch {}
+        } catch { }
         if (timers.has(k)) return; // already scheduled by another socket of this user
         const t = setTimeout(async () => {
             try {

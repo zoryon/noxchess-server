@@ -23,7 +23,7 @@ Each player starts the game with **10 Dream Energy (DE) points**.
 - **Usage:** Activating a piece’s **Special Active Ability** consumes DE, as specified in its description. If a player does not have enough DE, the ability cannot be used.
 - **Recovery:** A player regains Dream Energy in the following ways:
   - **+2 DE** when one of their pieces captures an enemy piece.
-  - **+1 DE** if, instead of moving, the player chooses to **"Meditate"**, skipping their movement turn. A player cannot meditate while in check.
+  - **+8 DE** if, instead of moving, the player chooses to **"Meditate"**, skipping their movement turn. A player cannot meditate while in check.
 
 ### 2. Nightmare Phases
 
