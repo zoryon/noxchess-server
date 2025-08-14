@@ -49,7 +49,7 @@ When a **Psychic Larva** (Pawn) reaches the 8th rank, it is not promoted to a st
 Instead, the player may choose one of the following:
 
 1. **Summon a Nightmare:** Remove the Larva and return a captured *Living Nightmare* piece (Banshee, Hunter, Doppelgänger, or Leaper) to the promotion square.
-2. **Infestation:** Remove the Larva and place **two new Psychic Larvae** on any two empty squares of the player's starting row.
+2. **Infestation:** Remove the Larva and place **three new Psychic Larvae** on any two empty squares of the player's starting row.
 
 ---
 

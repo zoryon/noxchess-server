@@ -568,25 +568,42 @@ export async function applyPromotion(ctx: HandlerContext, larvaId: number, choic
     if (!owner || owner.id !== ctx.me.id) return { ok: false, error: "not_your_piece" };
 
     if (choice.type === "SUMMON") {
-        // Remove larva and resurrect one captured piece of chosen type to its square
+        // Remove larva and either resurrect a captured piece of chosen type, or create a new one if none captured exists
         const allowed: $Enums.match_piece_type[] = ["PHANTOM_MATRIARCH", "SHADOW_HUNTER", "DOPPELGANGER", "PHOBIC_LEAPER"];
         if (!allowed.includes(choice.pieceType)) return { ok: false, error: "invalid_summon_type" };
-        // Find a captured piece of this type belonging to this player
+        // Prefer resurrecting a captured piece if available
         const resurrect = Array.from(ctx.piecesById.values()).find(p => p.playerId === larva.playerId && p.type === choice.pieceType && p.captured);
-        if (!resurrect) return { ok: false, error: "no_captured_piece_of_type" };
-
+        let producedId: number | null = null;
         await prisma.$transaction(async (tx) => {
+            // Remove larva
             await tx.match_piece.update({ where: { id: larva.id }, data: { captured: 1, posX: null, posY: null, status: PrismaNS.DbNull } });
-            await tx.match_piece.update({ where: { id: resurrect.id }, data: { captured: 0, posX: larva.posX, posY: larva.posY, status: mergeStatus(resurrect.status || {}, { resurrectedOnTurn: ctx.match.turn }) as any } });
+            if (resurrect) {
+                await tx.match_piece.update({ where: { id: resurrect.id }, data: { captured: 0, posX: larva.posX, posY: larva.posY, status: mergeStatus(resurrect.status || {}, { resurrectedOnTurn: ctx.match.turn }) as any } });
+                producedId = resurrect.id;
+            } else {
+                const created = await tx.match_piece.create({
+                    data: {
+                        matchId: ctx.match.id,
+                        playerId: larva.playerId!,
+                        type: choice.pieceType,
+                        posX: larva.posX!,
+                        posY: larva.posY!,
+                        captured: 0,
+                        usedAbility: 0,
+                    } as any,
+                    select: { id: true }
+                });
+                producedId = created.id;
+            }
             await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0 });
             // Promotion doesn’t consume a turn; the move that reached last rank already ended the turn or not based on extra step
         });
-        return { ok: true, broadcast: { promotion: "SUMMON", larvaId, resurrectedId: resurrect.id, at: { x: larva.posX, y: larva.posY } } };
+        return { ok: true, broadcast: { promotion: "SUMMON", larvaId, resurrectedId: producedId, at: { x: larva.posX, y: larva.posY } } };
     } else {
-        // INFEST: remove larva; place two new larvae on empty squares of the player's starting row
+        // INFEST: remove larva; place three new larvae on empty squares of the player's starting row
         const startRow = owner.color === "WHITE" ? 0 : 7;
         const positions = choice.positions;
-        if (!Array.isArray(positions) || positions.length !== 2) return { ok: false, error: "need_two_positions" };
+        if (!Array.isArray(positions) || positions.length !== 3) return { ok: false, error: "need_three_positions" };
         for (const pos of positions) {
             if (!isInside(pos.x, pos.y)) return { ok: false, error: "out_of_bounds" };
             if (pos.y !== startRow) return { ok: false, error: "must_be_on_start_row" };
@@ -594,7 +611,7 @@ export async function applyPromotion(ctx: HandlerContext, larvaId: number, choic
         }
         await prisma.$transaction(async (tx) => {
             await tx.match_piece.update({ where: { id: larva.id }, data: { captured: 1, posX: null, posY: null, status: PrismaNS.DbNull } });
-            for (let i = 0; i < 2; i++) {
+            for (let i = 0; i < 3; i++) {
                 await tx.match_piece.create({ data: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "PSYCHIC_LARVA", posX: positions[i].x, posY: positions[i].y, captured: 0, usedAbility: 0 } as any });
             }
             await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0, moveType: "NORMAL" });
