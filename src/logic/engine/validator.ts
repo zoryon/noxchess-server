@@ -356,32 +356,60 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
         }
     }
 
-    // Mind Parasite: enemy Leapers reduce max sliding range and block pawn double-step (tighter in CHAOS).
-    function underParasiteAt(x: number, y: number) {
-        for (const p of ctx.piecesById.values()) {
-            if (p.captured) continue;
-            if (p.type !== "PHOBIC_LEAPER") continue;
-            if (p.posX == null || p.posY == null) continue;
-            if (getPieceColor(ctx, p) === ctx.currentColor) continue; // only enemy leapers
-            const adx = Math.abs(p.posX - x), ady = Math.abs(p.posY - y);
-            if ((adx === 1 && ady === 2) || (adx === 2 && ady === 1)) return true;
-        }
-        return false;
-    }
-
-    const parasiteActive = underParasiteAt(from.x, from.y);
-    if (!castle && !creepingShadowsStep && parasiteActive) {
-        const dx = Math.abs(to.x - from.x), dy = Math.abs(to.y - from.y);
-        const step = Math.max(dx, dy);
-        const cap = ctx.phase === "CHAOS" ? 5 : 6; // limit sliding range; pawns double-step blocked below
+    // Fearful Terrain (DE version): enemy Leapers make their attacked squares "uneasy".
+    // If a sliding piece (rook/bishop/queen) starts inside any enemy Leaper's attack range and its path crosses an uneasy square to exit that range,
+    // it must spend 1 Dream Energy to complete the move. If it has insufficient DE, the move is illegal.
+    let fearfulTerrainCost = 0;
+    let fearfulTerrainTriggered = false;
+    let fearfulTerrainFirstUneasy: { x: number; y: number } | null = null;
+    if (!castle && !creepingShadowsStep) {
         const movement: MovementKind = override ?? (PIECES[piece.type].defaultMovement as MovementKind);
         if (movement === "rook" || movement === "bishop" || movement === "queen") {
-            if (step > cap) return { ok: false, error: "parasite_limit" };
-        } else if (movement === "pawn") {
-            // disallow double-step
-            const myColor = getPieceColor(ctx, piece);
-            const dir = myColor === "WHITE" ? 1 : -1;
-            if (dy === 2 && dx === 0 && ((to.y - from.y) === 2 * dir)) return { ok: false, error: "parasite_limit" };
+            // Helper to check if a coord is inside enemy leaper range
+            const insideLeaperRange = (x: number, y: number) => {
+                for (const p of ctx.piecesById.values()) {
+                    if (p.captured) continue;
+                    if (p.type !== "PHOBIC_LEAPER") continue;
+                    if (p.posX == null || p.posY == null) continue;
+                    if (getPieceColor(ctx, p) === ctx.currentColor) continue; // enemy only
+                    const adx = Math.abs(p.posX - x), ady = Math.abs(p.posY - y);
+                    if ((adx === 1 && ady === 2) || (adx === 2 && ady === 1)) return true;
+                }
+                return false;
+            };
+            const isInsideAtStart = insideLeaperRange(from.x, from.y);
+            if (isInsideAtStart) {
+                const dx = Math.sign(to.x - from.x);
+                const dy = Math.sign(to.y - from.y);
+                if (!(dx === 0 && dy === 0)) {
+                    let x = from.x + dx, y = from.y + dy;
+                    while (x !== to.x || y !== to.y) {
+                        // uneasy square if attacked by an enemy leaper
+                        let uneasy = false;
+                        for (const p of ctx.piecesById.values()) {
+                            if (p.captured) continue;
+                            if (p.type !== "PHOBIC_LEAPER") continue;
+                            if (p.posX == null || p.posY == null) continue;
+                            if (getPieceColor(ctx, p) === ctx.currentColor) continue;
+                            const adx = Math.abs(p.posX - x), ady = Math.abs(p.posY - y);
+                            if ((adx === 1 && ady === 2) || (adx === 2 && ady === 1)) { uneasy = true; break; }
+                        }
+                        if (uneasy) { fearfulTerrainFirstUneasy = { x, y }; break; }
+                        x += dx; y += dy;
+                    }
+                    // If we found an uneasy square along the path, check if destination is outside range (i.e., exiting the range)
+                    if (fearfulTerrainFirstUneasy) {
+                        const outsideAtEnd = !insideLeaperRange(to.x, to.y);
+                        if (outsideAtEnd) {
+                            fearfulTerrainTriggered = true;
+                            fearfulTerrainCost = 1;
+                            if ((ctx.me.dreamEnergy ?? 0) < fearfulTerrainCost) {
+                                return { ok: false, error: "fearful_terrain_insufficient_de" };
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -411,6 +439,10 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
         return { ok: false, error: "must_complete_unstable_form" };
     }
     await prisma.$transaction(async (tx) => {
+        // Charge DE for Fearful Terrain if applicable
+        if (fearfulTerrainTriggered && fearfulTerrainCost > 0) {
+            await chargeDETx(tx, ctx, fearfulTerrainCost);
+        }
         if (!castle && isCapture) {
             await tx.match_piece.update({ where: { id: targetId! }, data: { captured: 1, posX: null, posY: null } });
             // +2 DE for capture.

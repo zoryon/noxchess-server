@@ -80,8 +80,8 @@ export const PIECES: Record<string, PieceType> = {
         passiveAbility: {
             name: "Unstable Form",
             trigger: "passive",
-            description: "After capturing, must immediately move 1 additional legal square if possible (cannot capture the enemy's sleepless eye)",
-            // Implemented in engine/validator.ts: require an immediate extra step after a capture
+            description: "If possible, immediately move 1 additional legal square (cannot capture the enemy's sleepless eye)",
+            // Implemented in engine/validator.ts: require an immediate extra step after
             effect: () => {}
         }
     },
@@ -99,10 +99,10 @@ export const PIECES: Record<string, PieceType> = {
             effect: () => {}
         },
         passiveAbility: {
-            name: "Mind Parasite",
+            name: "Fearful Terrain",
             trigger: "passive",
-            description: "Enemy pieces within attack range have their maximum movement reduced by 1 square",
-            // Implemented in engine/validator.ts: reduce sliding range; block pawn double-step when under a Leaper's attack
+            description: "Squares the Leaper attacks are 'uneasy'. If a sliding piece starts inside the Leaper's attack range and moves through an uneasy square to exit that range, it must spend 1 Dream Energy to complete the move.",
+            // Implemented in engine/validator.ts: sliding movers pay 1 DE when exiting enemy Leaper range through an uneasy square; blocked if insufficient DE
             effect: () => {}
         }
     },
