@@ -263,7 +263,13 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
         // Restrict Unstable Form forced-step captures: only enemy Larva or enemy Doppelgänger are capturable
         if (isUnstableFollowup) {
             const allowed = tp.type === "PSYCHIC_LARVA" || tp.type === "DOPPELGANGER";
-            if (!allowed) return { ok: false, error: "unstable_capture_restricted" };
+            if (!allowed) return { ok: false, error: "unstable_capture_restricted_to_larva_or_doppelganger" };
+        }
+        // Psychic Gateway follow-up: captures are only allowed if the target is an enemy Larva
+        if (isGatewayFollowup) {
+            if (tp.type !== "PSYCHIC_LARVA") {
+                return { ok: false, error: "gateway_capture_restricted_to_larva" };
+            }
         }
     // Camouflage: a Shadow Hunter may be temporarily uncapturable if camouflaged (longer during CHAOS).
         const tStatus: any = tp.status ?? {};
