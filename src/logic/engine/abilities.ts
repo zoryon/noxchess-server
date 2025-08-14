@@ -151,7 +151,7 @@ async function terrifyingGaze(ctx: HandlerContext, pieceId: number, attempt: Abi
         await chargeDETx(txdb, ctx, cost);
         await txdb.match_piece.update({ where: { id: eye.id }, data: { usedAbility: used + 1 } });
         await txdb.match_piece.update({ where: { id: target.id }, data: { posX: pushX, posY: pushY } });
-    await logMoveTx(txdb, ctx, { fromX: (tx as number), fromY: (ty as number), toX: pushX, toY: pushY, pieceType: eye.type, capturedPieceType: null, specialAbilityUsed: 1, moveType: "ABILITY" });
+        await logMoveTx(txdb, ctx, { fromX: (tx as number), fromY: (ty as number), toX: pushX, toY: pushY, pieceType: eye.type, capturedPieceType: null, specialAbilityUsed: 1 });
         await incTurnTx(txdb, ctx);
     });
 
@@ -202,7 +202,7 @@ async function etherealPassage(ctx: HandlerContext, pieceId: number, attempt: Ab
     await prisma.$transaction(async (tx) => {
     await chargeDETx(tx, ctx, cost);
     await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, usedAbility: (used + 1), status: mergeStatus(piece.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn }) as any } });
-    await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: null, specialAbilityUsed: 1, moveType: "ABILITY" });
+        await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: null, specialAbilityUsed: 1 });
         await incTurnTx(tx, ctx);
     });
 
@@ -263,7 +263,7 @@ async function shadowBind(ctx: HandlerContext, pieceId: number, attempt: Ability
         await chargeDETx(tx, ctx, cost);
         await tx.match_piece.update({ where: { id: targetPiece.id }, data: { status: newStatus as any } });
         await tx.match_piece.update({ where: { id: hunter.id }, data: { usedAbility: used + 1 } });
-    await logMoveTx(tx, ctx, { fromX: hunter.posX!, fromY: hunter.posY!, toX: targetX!, toY: targetY!, pieceType: hunter.type, capturedPieceType: null, specialAbilityUsed: 1, moveType: "ABILITY" });
+        await logMoveTx(tx, ctx, { fromX: hunter.posX!, fromY: hunter.posY!, toX: targetX!, toY: targetY!, pieceType: hunter.type, capturedPieceType: null, specialAbilityUsed: 1 });
         await incTurnTx(tx, ctx);
     });
 
@@ -323,7 +323,7 @@ async function mimicry(ctx: HandlerContext, pieceId: number, attempt: AbilityAtt
     await prisma.$transaction(async (txdb) => {
         await txdb.match_player.update({ where: { id: ctx.me.id }, data: { dreamEnergy: { decrement: cost } } });
         await txdb.match_piece.update({ where: { id: dopp.id }, data: { status: newStatus as any, usedAbility: used + 1 } });
-        await logMoveTx(txdb, ctx, { fromX: dopp.posX!, fromY: dopp.posY!, toX: dopp.posX!, toY: dopp.posY!, pieceType: dopp.type, capturedPieceType: null, specialAbilityUsed: 1, moveType: "ABILITY" });
+        await logMoveTx(txdb, ctx, { fromX: dopp.posX!, fromY: dopp.posY!, toX: dopp.posX!, toY: dopp.posY!, pieceType: dopp.type, capturedPieceType: null, specialAbilityUsed: 1 });
         // no turn increment here
     });
 
@@ -388,7 +388,7 @@ async function terrorLeap(ctx: HandlerContext, pieceId: number, attempt: Ability
     // Move and increment used ability; mark hasMoved, log ABILITY, end turn.
     await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, usedAbility: (used + 1), status: mergeStatus(piece.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn }) as any } });
 
-    await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: isCapture ? ctx.piecesById.get(destId!)?.type ?? null : null, specialAbilityUsed: 1, moveType: "ABILITY" });
+    await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: isCapture ? ctx.piecesById.get(destId!)?.type ?? null : null, specialAbilityUsed: 1 });
 
         await incTurnTx(tx, ctx);
     });
@@ -410,7 +410,7 @@ async function psychicBurst(ctx: HandlerContext, pieceId: number, attempt: Abili
     const armed = mergeStatus(larva.status || {}, { psychicBurstArmedTurn: ctx.match.turn });
     await prisma.$transaction(async (txdb) => {
         await txdb.match_piece.update({ where: { id: larva.id }, data: { status: armed as any } });
-        await logMoveTx(txdb, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: larva.type, capturedPieceType: null, specialAbilityUsed: 1, moveType: "ABILITY" });
+        await logMoveTx(txdb, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: larva.type, capturedPieceType: null, specialAbilityUsed: 1 });
         // No DE spending and no turn increment here; charge on successful capture only
     });
 

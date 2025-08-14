@@ -23,14 +23,15 @@ type LogMoveData = {
 };
 
 export function logMoveTx(tx: any, ctx: HandlerContext, data: LogMoveData) {
+    // Strip non-schema fields like moveType; keep only columns defined in Prisma schema
+    const { moveType: _ignoredMoveType, ...rest } = data as any;
     return tx.match_move.create({
         data: {
             matchId: ctx.match.id,
             playerId: ctx.me.userId,
             moveNumber: ctx.match.turn,
-            ...data,
-            specialAbilityUsed: data.specialAbilityUsed ?? 1,
-            moveType: (data as any).moveType ?? "NORMAL"
+            ...rest,
+            specialAbilityUsed: rest.specialAbilityUsed ?? 0,
         } as any
     });
 }

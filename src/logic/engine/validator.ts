@@ -463,7 +463,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             const rookStatus = mergeStatus(rook.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn }) as any;
             await tx.match_piece.update({ where: { id: castle.rookId }, data: { posX: castle.rookToX, posY: from.y, status: rookStatus } });
 
-            await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: castle.kingToX, toY: from.y, pieceType: piece.type, capturedPieceType: null, specialAbilityUsed: 0, moveType: "CASTLE" });
+            await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: castle.kingToX, toY: from.y, pieceType: piece.type, capturedPieceType: null, specialAbilityUsed: 0 });
             // If this piece had an echo pending and moved now, clear echo flags
             if (echoActive) {
                 const clearedEcho = removeStatusKeys(kingStatus, ["echoPendingFromTurn", "echoPendingTurns", "echoDeclaredForTurn", "echoDeclFromX", "echoDeclFromY", "echoDeclToX", "echoDeclToY"]) as any;
@@ -480,7 +480,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, status: newStatus } });
             }
 
-            await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: isCapture ? ctx.piecesById.get(targetId!)?.type ?? null : null, specialAbilityUsed: 0, moveType: "NORMAL" });
+            await logMoveTx(tx, ctx, { fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, pieceType: piece.type, capturedPieceType: isCapture ? ctx.piecesById.get(targetId!)?.type ?? null : null, specialAbilityUsed: 0 });
 
             // Unstable Form: after a Doppelgänger captures, it must make one extra move this turn.
             if (piece.type === "DOPPELGANGER" && isCapture && !pendingUnstable) {
@@ -575,7 +575,7 @@ export async function applyPromotion(ctx: HandlerContext, larvaId: number, choic
         await prisma.$transaction(async (tx) => {
             await tx.match_piece.update({ where: { id: larva.id }, data: { captured: 1, posX: null, posY: null, status: PrismaNS.DbNull } });
             await tx.match_piece.update({ where: { id: resurrect.id }, data: { captured: 0, posX: larva.posX, posY: larva.posY, status: mergeStatus(resurrect.status || {}, { resurrectedOnTurn: ctx.match.turn }) as any } });
-            await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0, moveType: "NORMAL" });
+            await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0 });
             // Promotion doesn’t consume a turn; the move that reached last rank already ended the turn or not based on extra step
         });
         return { ok: true, broadcast: { promotion: "SUMMON", larvaId, resurrectedId: resurrect.id, at: { x: larva.posX, y: larva.posY } } };

@@ -69,9 +69,30 @@ io.on("connection", async (socket) => {
       if (!gameState) return;
 
       if (oppSocket) {
-        socket.join(`match:${gameState.id}`);
-        oppSocket.join(`match:${gameState.id}`);
-        io.to(`match:${gameState.id}`).emit("match:start", gameState);
+        const room = `match:${gameState.id}`;
+        // Join both sockets to the room atomically and emit directly to both ids to avoid race conditions
+        try {
+          // Join both players to the match room
+          io.in([socket.id, oppSocket.id]).socketsJoin(room);
+        } catch {}
+
+        // Deploy game handler for BOTH players so they can interact immediately without reconnecting
+        try {
+          await import("@/logic/game.js").then(async ({ deployGameHandler }) => {
+            // Deploy for the initiating socket (already a real Socket)
+            await deployGameHandler(io, socket, gameState.id);
+            // Try to fetch the real Socket instance for the opponent and deploy as well
+            const oppReal = io.of("/").sockets.get(oppSocket.id as string);
+            if (oppReal) {
+              await deployGameHandler(io, oppReal, gameState.id);
+            }
+          });
+        } catch (e) {
+          console.warn("failed to deploy game handlers for both players", e);
+        }
+
+        // Emit start event directly to both sockets to ensure both clients navigate
+        io.to([socket.id, oppSocket.id]).emit("match:start", gameState);
       } else {
         console.warn(`Opponent socket for userId ${opponentId} not found.`);
         socket.emit("error:opponent_disconnected");

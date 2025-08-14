@@ -3,7 +3,7 @@ import { DefaultEventsMap, RemoteSocket, Server, Socket } from "socket.io";
 import { GameState } from "@/types/index.js";
 import { addToQueue, findMatchInQueue } from "@/logic/queue.js";
 import { setupBoard } from "@/logic/setup.js";
-import { deployGameHandler, fetchCurrentGameStateById } from "@/logic/game.js";
+import { fetchCurrentGameStateById } from "@/logic/game.js";
 
 type createMatchResult = {
     gameState: GameState | undefined;
@@ -42,8 +42,6 @@ export async function createMatch(io: Server, socket: Socket): Promise<createMat
     // Get the opponent player
     const sockets = await io.fetchSockets();
     const oppSocket = sockets.find(s => s.data.user.userId === result.opponentId);
-
-    await deployGameHandler(io, socket, gameState.id);
 
     return { gameState, opponentId: result.opponentId, oppSocket };
 }
