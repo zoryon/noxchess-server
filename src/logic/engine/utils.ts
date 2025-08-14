@@ -1,6 +1,7 @@
 import { $Enums } from "@/generated/prisma/index.js";
 import { FullMatch, HandlerContext } from "@/types/engine-types.js";
 import { DbPiece } from "@/types/pieces-types.js";
+import { PIECES } from "@/constants/index.js";
 
 export function getPhase(turn: number) {
     if (turn <= 4) return "CALM" as const;
@@ -57,4 +58,58 @@ export function removeStatusKeys(oldStatus: any, keys: string[]) {
     const base = (oldStatus && typeof oldStatus === 'object') ? { ...oldStatus } : {} as any;
     for (const k of keys) delete base[k];
     return base;
+}
+
+// --- Generic board helpers & common rules ---
+export function isInside(x: number, y: number) {
+    return x >= 0 && x < 8 && y >= 0 && y < 8;
+}
+
+export function cloneBoard(board: (number | null)[][]): (number | null)[][] {
+    return board.map(row => row.slice());
+}
+
+export function abilityCost(type: string, name: string): number {
+    const def = PIECES[type];
+    if (!def || !def.activeAbility) return 0;
+    return def.activeAbility.cost ?? 0;
+}
+
+// Parse an ability target that must reference an occupied square (either via pieceId or coordinates).
+// Keeps original error strings used by abilities.
+export function resolveTargetOccupied(
+    ctx: HandlerContext,
+    target: any
+): { ok: true; x: number; y: number; pieceId: number } | { ok: false; error: string } {
+    if (!target) return { ok: false, error: "missing_target" };
+    if (typeof target.pieceId === "number") {
+        const tp = ctx.piecesById.get(target.pieceId || -1);
+        if (!tp || tp.posX == null || tp.posY == null) return { ok: false, error: "target_not_found" };
+        return { ok: true, x: tp.posX, y: tp.posY, pieceId: tp.id };
+    }
+    if (typeof target.x === "number" && typeof target.y === "number") {
+        if (!isInside(target.x, target.y)) return { ok: false, error: "out_of_bounds" };
+        const idAt = ctx.board[target.y][target.x];
+        if (idAt == null) return { ok: false, error: "no_piece_at_target" };
+        return { ok: true, x: target.x, y: target.y, pieceId: idAt };
+    }
+    return { ok: false, error: "invalid_target" };
+}
+
+// Passive: Field of Fear — blocks using abilities when adjacent to enemy Sleepless Eye (radius 1; CHAOS: 2)
+export function isBlockedByFieldOfFear(ctx: HandlerContext, piece: DbPiece): boolean {
+    const fearRadius = ctx.phase === "CHAOS" ? 2 : 1;
+    for (const p of ctx.piecesById.values()) {
+        if (p.captured) continue;
+        if (p.type !== "SLEEPLESS_EYE") continue;
+        const eyeOwner = ctx.match.match_player.find(mp => mp.userId === p.playerId);
+        if (!eyeOwner || eyeOwner.color === ctx.currentColor) continue; // only enemy Eye matters
+        if (p.posX == null || p.posY == null || piece.posX == null || piece.posY == null) continue;
+        const dx = Math.abs(p.posX - piece.posX);
+        const dy = Math.abs(p.posY - piece.posY);
+        if (dx <= fearRadius && dy <= fearRadius && !(dx === 0 && dy === 0)) {
+            return true;
+        }
+    }
+    return false;
 }

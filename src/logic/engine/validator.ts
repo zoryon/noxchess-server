@@ -1,7 +1,7 @@
 import { $Enums, Prisma as PrismaNS } from "@/generated/prisma/index.js";
 import { prisma } from "@/lib/prisma.js";
 import { PIECES } from "@/constants/index.js";
-import { getDangerousSquare, mergeStatus, removeStatusKeys } from "@/logic/engine/utils.js";
+import { cloneBoard, getDangerousSquare, isInside, mergeStatus, removeStatusKeys } from "@/logic/engine/utils.js";
 import { addDETx, chargeDETx, incTurnTx, logMoveTx } from "@/logic/engine/tx-helpers.js";
 import { HandlerContext, MoveAttempt, MovementKind, DbPiece } from "@/types/index.js";
 
@@ -10,9 +10,7 @@ export type ApplyResult = { ok: true; broadcast: any } | { ok: false; error: str
 // Base movement rules for king/queen/rook/bishop/knight/pawn.
 // Special rules, passives, and phase effects are layered on top in applyMove.
 
-function isInside(x: number, y: number) {
-    return x >= 0 && x < 8 && y >= 0 && y < 8;
-}
+// isInside moved to utils
 
 function pathClear(board: (number | null)[][], fromX: number, fromY: number, toX: number, toY: number) {
     const dx = Math.sign(toX - fromX);
@@ -81,9 +79,7 @@ export function canMoveLike(
     }
 }
 
-function cloneBoard(board: (number | null)[][]): (number | null)[][] {
-    return board.map(row => row.slice());
-}
+// cloneBoard moved to utils
 
 function otherColor(c: $Enums.match_player_color): $Enums.match_player_color {
     return c === "WHITE" ? "BLACK" : "WHITE";
@@ -264,6 +260,11 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
         if (tColor === ctx.currentColor) return { ok: false, error: "cannot_capture_ally" };
         // During the forced Unstable step, cannot capture the enemy king
         if (isUnstableFollowup && tp.type === "SLEEPLESS_EYE") return { ok: false, error: "cannot_capture_king" };
+        // Restrict Unstable Form forced-step captures: only enemy Larva or enemy Doppelgänger are capturable
+        if (isUnstableFollowup) {
+            const allowed = tp.type === "PSYCHIC_LARVA" || tp.type === "DOPPELGANGER";
+            if (!allowed) return { ok: false, error: "unstable_capture_restricted" };
+        }
     // Camouflage: a Shadow Hunter may be temporarily uncapturable if camouflaged (longer during CHAOS).
         const tStatus: any = tp.status ?? {};
         const camoUntil: number | undefined = tStatus.camouflagedUntilTurn;
@@ -353,9 +354,9 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     if (isUnstableFollowup) {
         // Only allow a single diagonal step; destination can be empty or capture an enemy (ally capture blocked earlier).
         const adx = Math.abs(to.x - from.x), ady = Math.abs(to.y - from.y);
-        if (!(adx === 1 && ady === 1)) return { ok: false, error: "unstable_must_step_diagonal" };
+        if (!(adx === 1 && ady === 1)) return { ok: false, error: "unstable_must_step_one_square_diagonal" };
         // Disallow castling in any case (not applicable to Doppelgänger, but for completeness)
-        if (castle) return { ok: false, error: "unstable_must_step_diagonal" };
+        if (castle) return { ok: false, error: "unstable_must_step_one_square_diagonal" };
     } else {
         if (!canMoveLike(ctx, piece, from.x, from.y, to.x, to.y, override) && !castle && !creepingShadowsStep) return { ok: false, error: "illegal_move" };
     }
@@ -590,6 +591,8 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                         const tColor2 = getPieceColor(ctx, tp2);
                         if (tColor2 === myColor) continue; // cannot capture ally
                         if (tp2.type === "SLEEPLESS_EYE") continue; // cannot capture enemy king during forced step
+                        // Restrict Unstable Form forced-step captures: only Larva or Doppelgänger are capturable
+                        if (!(tp2.type === "PSYCHIC_LARVA" || tp2.type === "DOPPELGANGER")) continue;
                     }
                     // King safety check for this hypothetical extra step
                     const pieceAfter = piecesAfter.get(piece.id)!;
