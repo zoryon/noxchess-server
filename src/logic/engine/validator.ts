@@ -65,7 +65,7 @@ export function canMoveLike(
             const startRow = color === "WHITE" ? 1 : 6;
             if (dx === 0 && fromY === startRow && dy === 2 * dir && ctx.board[fromY + dir][fromX] === null && ctx.board[toY][toX] === null) return true;
             // capture diagonally
-            if (adx === 1 && dy === dir) { 
+            if (adx === 1 && dy === dir) {
                 const targetId = ctx.board[toY][toX];
                 if (targetId !== null) {
                     const tp = ctx.piecesById.get(targetId)!;
@@ -271,7 +271,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 return { ok: false, error: "gateway_capture_restricted_to_larva" };
             }
         }
-    // Camouflage: a Shadow Hunter may be temporarily uncapturable if camouflaged (longer during CHAOS).
+        // Camouflage: a Shadow Hunter may be temporarily uncapturable if camouflaged (longer during CHAOS).
         const tStatus: any = tp.status ?? {};
         const camoUntil: number | undefined = tStatus.camouflagedUntilTurn;
         if (tp.type === "SHADOW_HUNTER" && camoUntil && ctx.match.turn <= camoUntil) {
@@ -509,7 +509,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             }
         }
 
-    // Psychic Burst: if a Larva was armed and then captured a piece, immobilize adjacent enemies next enemy turn; charge DE now and consume the use.
+        // Psychic Burst: if a Larva was armed and then captured a piece, immobilize adjacent enemies next enemy turn; charge DE now and consume the use.
         if (piece.type === "PSYCHIC_LARVA" && isCapture) {
             const st = (piece.status ?? {}) as any;
             if (st.psychicBurstArmedTurn === ctx.match.turn) {
@@ -518,7 +518,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
 
                 const oppColor = ctx.currentColor === "WHITE" ? "BLACK" : "WHITE";
                 const adj: Array<{ id: number; status: any } | null> = [];
-                const dirs = [ [-1,-1], [0,-1], [1,-1], [-1,0], [1,0], [-1,1], [0,1], [1,1] ];
+                const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
                 for (const [dx, dy] of dirs) {
                     const ax = to.x + dx, ay = to.y + dy;
                     if (ax < 0 || ax > 7 || ay < 0 || ay > 7) continue;
@@ -540,7 +540,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             }
         }
 
-    if (castle) {
+        if (castle) {
             // Move king and rook, mark hasMoved
             const kingStatus = mergeStatus(piece.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn }) as any;
             await tx.match_piece.update({ where: { id: piece.id }, data: { posX: castle.kingToX, posY: from.y, status: kingStatus } });
@@ -554,14 +554,14 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 const clearedEcho = removeStatusKeys(kingStatus, ["echoPendingFromTurn", "echoPendingTurns", "echoDeclaredForTurn", "echoDeclFromX", "echoDeclFromY", "echoDeclToX", "echoDeclToY"]) as any;
                 await tx.match_piece.update({ where: { id: piece.id }, data: { status: clearedEcho } });
             }
-    } else {
+        } else {
             // Clear mimic after use and mark hasMoved
             if (piece.type === "DOPPELGANGER" && override) {
                 const cleared = removeStatusKeys(mimicStatus || {}, ["mimic", "mimicTurn"]) as any;
-        const newStatus = mergeStatus(cleared, { hasMoved: true, lastMovedTurn: ctx.match.turn, ...(creepingShadowsStep ? { shadowsUsedInShadowsPhase: true } : {}) }) as any;
+                const newStatus = mergeStatus(cleared, { hasMoved: true, lastMovedTurn: ctx.match.turn, ...(creepingShadowsStep ? { shadowsUsedInShadowsPhase: true } : {}) }) as any;
                 await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, status: newStatus } });
             } else {
-        const newStatus = mergeStatus(piece.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn, ...(creepingShadowsStep ? { shadowsUsedInShadowsPhase: true } : {}) }) as any;
+                const newStatus = mergeStatus(piece.status || {}, { hasMoved: true, lastMovedTurn: ctx.match.turn, ...(creepingShadowsStep ? { shadowsUsedInShadowsPhase: true } : {}) }) as any;
                 await tx.match_piece.update({ where: { id: piece.id }, data: { posX: to.x, posY: to.y, status: newStatus } });
             }
 
@@ -586,7 +586,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                     }
                 }
                 const myColor = getPieceColor(ctx, piece);
-                const dirs = [[1,1],[1,-1],[-1,1],[-1,-1]] as const;
+                const dirs = [[1, 1], [1, -1], [-1, 1], [-1, -1]] as const;
                 let hasLegalFollowup = false;
                 for (const [dx, dy] of dirs) {
                     const nx = to.x + dx, ny = to.y + dy;
@@ -640,19 +640,19 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             }
         }
 
-    // Unstable Ground: in UNSTABLE, ending on the dangerous square immobilizes this piece on its next own turn.
-    if (ctx.phase === "UNSTABLE") {
+        // Unstable Ground: in UNSTABLE, ending on the dangerous square immobilizes this piece on its next own turn.
+        if (ctx.phase === "UNSTABLE") {
             const d = getDangerousSquare(ctx.match.id, ctx.match.turn);
             const endedAt = castle ? { x: castle.kingToX, y: from.y } : to;
             if (endedAt.x === d.x && endedAt.y === d.y) {
-        // Immobilize this piece on its next turn (not opponent's): set to turn+2 because turns alternate
-        const st = mergeStatus((piece.type === "SLEEPLESS_EYE" ? (await tx.match_piece.findUnique({ where: { id: piece.id } }))?.status : (piece.status || {})), { immobilizedOnTurn: ctx.match.turn + 2 }) as any;
+                // Immobilize this piece on its next turn (not opponent's): set to turn+2 because turns alternate
+                const st = mergeStatus((piece.type === "SLEEPLESS_EYE" ? (await tx.match_piece.findUnique({ where: { id: piece.id } }))?.status : (piece.status || {})), { immobilizedOnTurn: ctx.match.turn + 2 }) as any;
                 await tx.match_piece.update({ where: { id: piece.id }, data: { status: st } });
             }
         }
 
-    // End-of-turn updates if not requiring extra step
-    if (!needExtraStep && !promotionPending) {
+        // End-of-turn updates if not requiring extra step
+        if (!needExtraStep && !promotionPending) {
             // No speed-limit decrement anymore.
 
             // Camouflage: Hunters that didn't move this turn become camouflaged until the opponent's next (CHAOS: +2 turns).
