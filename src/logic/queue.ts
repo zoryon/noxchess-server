@@ -32,14 +32,14 @@ export async function findMatchInQueue(userId: number) {
         });
 
         // Create the match + match_player
-        const match = await tx.match.create({
+    const match = await tx.match.create({
             data: {
                 status: "ONGOING",
                 turn: 1,
                 match_player: {
                     create: [
-                        { userId, color: "WHITE" },
-                        { userId: opp.userId, color: "BLACK" }
+            { userId, color: "WHITE", dreamEnergy: 20 },
+            { userId: opp.userId, color: "BLACK", dreamEnergy: 20 }
                     ]
                 }
             },
