@@ -28,8 +28,10 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
 
     // Per-turn idle timers (one per match) and idle counters per player
     if (!globalAny.__lnm_turnTimers) globalAny.__lnm_turnTimers = new Map<number, NodeJS.Timeout>();
+    if (!globalAny.__lnm_timeExpireTimers) globalAny.__lnm_timeExpireTimers = new Map<number, NodeJS.Timeout>();
     if (!globalAny.__lnm_idleCounts) globalAny.__lnm_idleCounts = new Map<string, number>();
     const turnTimers: Map<number, NodeJS.Timeout> = globalAny.__lnm_turnTimers;
+    const timeExpireTimers: Map<number, NodeJS.Timeout> = globalAny.__lnm_timeExpireTimers;
     const idleCounts: Map<string, number> = globalAny.__lnm_idleCounts;
 
     // Schedule/refresh a 3-minute idle timer for the current player to move. If they do nothing, auto-idle.
@@ -146,6 +148,51 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
         io.to(room).emit("match:update", { match, phase, clocks, dangerousSquare: danger });
         // (Re)schedule the 3-minute per-turn idle timer for the current player
         await scheduleTurnTimer(match);
+        // (Re)schedule a time-expire timer for the current player’s remaining main time
+        await scheduleTimeExpireTimer(match, clocks);
+    }
+
+    async function scheduleTimeExpireTimer(matchObj?: any, clocksObj?: { whiteMs: number; blackMs: number }) {
+        const match = matchObj ?? (await fetchCurrentGameStateById(matchId));
+        if (!match) return;
+        // Clear existing timer if any
+        const existing = timeExpireTimers.get(matchId);
+        if (existing) {
+            clearTimeout(existing);
+            timeExpireTimers.delete(matchId);
+        }
+        if (match.status === "FINISHED") return;
+        const clocks = clocksObj ?? (await computeClocks(match));
+        const currentColor = match.turn % 2 === 1 ? "WHITE" : "BLACK";
+        const timeLeft = currentColor === "WHITE" ? clocks.whiteMs : clocks.blackMs;
+        if (timeLeft <= 0) {
+            // Immediate time forfeit
+            const winner = match.match_player.find((p: any) => p.color !== currentColor);
+            await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
+            io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "time" });
+            return;
+        }
+        const t = setTimeout(async () => {
+            try {
+                const latest = await fetchCurrentGameStateById(matchId);
+                if (!latest || latest.status === "FINISHED") return;
+                // If turn changed, this timer is no longer valid; next emitState will reschedule
+                if (latest.turn !== match.turn) return;
+                const clocksNow = await computeClocks(latest);
+                const nowColor = latest.turn % 2 === 1 ? "WHITE" : "BLACK";
+                const nowLeft = nowColor === "WHITE" ? clocksNow.whiteMs : clocksNow.blackMs;
+                if (nowLeft <= 0) {
+                    const winner = latest.match_player.find((p: any) => p.color !== nowColor);
+                    await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
+                    io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "time" });
+                }
+            } catch {
+                // ignore errors
+            } finally {
+                timeExpireTimers.delete(matchId);
+            }
+        }, Math.max(1, timeLeft + 5)); // small cushion
+        timeExpireTimers.set(matchId, t);
     }
 
     // Initial state sync for the connecting socket
@@ -353,6 +400,27 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
             io.to(room).emit("promotion:applied", res.broadcast);
             await emitState();
             ack?.({ ok: true });
+        } catch (e: any) {
+            ack?.({ ok: false, error: e.message || "unknown_error" });
+        }
+    });
+
+    // Backstop: client can probe server time to trigger time forfeit immediately when client sees 0
+    socket.on("clock:probe", async (_payload, ack?: (res: any) => void) => {
+        try {
+            const match = await fetchCurrentGameStateById(matchId);
+            if (!match || match.status === "FINISHED") { ack?.({ ok: true, finished: true }); return; }
+            const clocks = await computeClocks(match);
+            const currentColor = match.turn % 2 === 1 ? "WHITE" : "BLACK";
+            const timeLeft = currentColor === "WHITE" ? clocks.whiteMs : clocks.blackMs;
+            if (timeLeft <= 0) {
+                const winner = match.match_player.find((p: any) => p.color !== currentColor);
+                await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
+                io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "time" });
+                ack?.({ ok: true, finished: true });
+                return;
+            }
+            ack?.({ ok: true, finished: false, timeLeft });
         } catch (e: any) {
             ack?.({ ok: false, error: e.message || "unknown_error" });
         }
