@@ -1,7 +1,7 @@
 import { DefaultEventsMap, RemoteSocket, Server, Socket } from "socket.io";
 
 import { GameState } from "@/types/index.js";
-import { addToQueue, findMatchInQueue } from "@/logic/queue.js";
+import { addToQueue, findMatchInQueue, finalizeQueueAfterMatch, releaseQueueClaim } from "@/logic/queue.js";
 import { setupBoard } from "@/logic/setup.js";
 import { fetchCurrentGameStateById } from "@/logic/game.js";
 
@@ -19,30 +19,53 @@ export async function createMatch(io: Server, socket: Socket): Promise<createMat
     // Try to insert user into queue
     await addToQueue(userId);
 
-    // Check if there is another waiting player
-    const result = await findMatchInQueue(userId);
+    // Attempt to claim an opponent from the queue
+    const claim = await findMatchInQueue(userId);
 
-    if (!result) {
+    if (!claim) {
         // No opponent found, notify client
         socket.emit("match:searching");
         return { gameState: undefined, opponentId: -1, oppSocket: undefined };
     }
 
-    // Setup board
-    await setupBoard(result.match.id, userId, result.opponentId);
+    // Ensure opponent socket is connected; otherwise release claim and keep searching
+    const sockets = await io.fetchSockets();
+    const oppSocket = sockets.find(s => s.data.user.userId === claim.opponentId);
+    if (!oppSocket) {
+        await releaseQueueClaim(userId, claim.opponentId);
+        socket.emit("match:searching");
+        return { gameState: undefined, opponentId: claim.opponentId, oppSocket: undefined };
+    }
+
+    // Create the match and players now that both sockets are confirmed present
+    const match = await (await import("@/lib/prisma.js")).prisma.match.create({
+        data: {
+            status: "ONGOING",
+            turn: 1,
+            match_player: {
+                create: [
+                    { userId, color: "WHITE", dreamEnergy: 20 },
+                    { userId: claim.opponentId, color: "BLACK", dreamEnergy: 20 }
+                ]
+            }
+        },
+        include: { match_player: true }
+    });
+
+    // Setup board pieces
+    await setupBoard(match.id, userId, claim.opponentId);
 
     // Fetch full game state (match, players, pieces)
-    const gameState = await fetchCurrentGameStateById(result.match.id);
+    const gameState = await fetchCurrentGameStateById(match.id);
 
     if (!gameState) {
-        console.warn(`Game state for matchId ${result.match.id} not found.`);
+        console.warn(`Game state for matchId ${match.id} not found.`);
         return { gameState: undefined, opponentId: -1, oppSocket: undefined };
     }
 
-    // Get the opponent player
-    const sockets = await io.fetchSockets();
-    const oppSocket = sockets.find(s => s.data.user.userId === result.opponentId);
+    // Finalize queue for both players to prevent stray waiting state
+    await finalizeQueueAfterMatch(userId, claim.opponentId);
 
-    return { gameState, opponentId: result.opponentId, oppSocket };
+    return { gameState, opponentId: claim.opponentId, oppSocket };
 }
 

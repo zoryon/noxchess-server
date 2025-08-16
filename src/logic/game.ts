@@ -381,7 +381,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
             });
 
             io.to(room).emit("match:finished", { matchId, winnerId: opponent?.userId ?? null, reason: "resign" });
-            ack?.({ ok: true });
+            ack?.({ ok: true, matchId });
         } catch (e: any) {
             ack?.({ ok: false, error: e.message || "unknown_error" });
         }
