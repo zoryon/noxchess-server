@@ -385,7 +385,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
     let fearfulTerrainCost = 0;
     let fearfulTerrainTriggered = false;
     let fearfulTerrainFirstUneasy: { x: number; y: number } | null = null;
-    if (!castle && !creepingShadowsStep) {
+    if (!castle && !creepingShadowsStep && ctx.phase !== "CALM") {
         const movement: MovementKind = override ?? (PIECES[piece.type].defaultMovement as MovementKind);
         if (movement === "rook" || movement === "bishop" || movement === "queen") {
             // Helper to check if a coord is inside enemy leaper range
@@ -623,17 +623,19 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
         }
 
         // End-of-turn updates if not requiring extra step
-        if (!needExtraStep && !promotionPending) {
+    if (!needExtraStep && !promotionPending) {
             // No speed-limit decrement anymore.
 
-            // Camouflage: Hunters that didn't move this turn become camouflaged until the opponent's next (CHAOS: +2 turns).
-            const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
-            const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
-            for (const h of hunters) {
-                const hs: any = h.status ?? {};
-                const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
-                const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
-                await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+            // Camouflage during non-CALM phases: Hunters that didn't move this turn become camouflaged until the opponent's next (CHAOS: +2 turns).
+            if (ctx.phase !== "CALM") {
+                const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
+                const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
+                for (const h of hunters) {
+                    const hs: any = h.status ?? {};
+                    const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
+                    const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
+                    await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+                }
             }
 
             // If this was the forced Unstable follow-up for a Doppelgänger, clear the flag now and end the turn
@@ -706,14 +708,16 @@ export async function applyPromotion(ctx: HandlerContext, larvaId: number, choic
                 producedId = created.id;
             }
             await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0 });
-            // End-of-turn: apply Camouflage updates for the acting player's Hunters, then increment turn
-            const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
-            const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
-            for (const h of hunters) {
-                const hs: any = h.status ?? {};
-                const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
-                const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
-                await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+            // End-of-turn: apply Camouflage updates during non-CALM phases, then increment turn
+            if (ctx.phase !== "CALM") {
+                const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
+                const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
+                for (const h of hunters) {
+                    const hs: any = h.status ?? {};
+                    const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
+                    const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
+                    await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+                }
             }
             await incTurnTx(tx, ctx);
         });
@@ -734,14 +738,16 @@ export async function applyPromotion(ctx: HandlerContext, larvaId: number, choic
                 await tx.match_piece.create({ data: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "PSYCHIC_LARVA", posX: positions[i].x, posY: positions[i].y, captured: 0, usedAbility: 0 } as any });
             }
             await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0, moveType: "NORMAL" });
-            // End-of-turn: apply Camouflage updates and increment turn
-            const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
-            const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
-            for (const h of hunters) {
-                const hs: any = h.status ?? {};
-                const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
-                const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
-                await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+            // End-of-turn: apply Camouflage updates during non-CALM phases and increment turn
+            if (ctx.phase !== "CALM") {
+                const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
+                const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
+                for (const h of hunters) {
+                    const hs: any = h.status ?? {};
+                    const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
+                    const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
+                    await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+                }
             }
             await incTurnTx(tx, ctx);
         });

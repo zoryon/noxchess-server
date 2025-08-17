@@ -143,9 +143,34 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
         const match = await fetchCurrentGameStateById(matchId);
         if (!match) return;
         const phase = getPhase(match.turn);
+        const nextPhase = (() => {
+            if (phase === "CALM") return { name: "SHADOWS", inTurns: 5 - match.turn } as const;
+            if (phase === "SHADOWS") return { name: "UNSTABLE", inTurns: 41 - match.turn } as const;
+            if (phase === "UNSTABLE") return { name: "CHAOS", inTurns: 61 - match.turn } as const;
+            return null;
+        })();
+        // One-time CHAOS entry effects: triple DE and refresh abilities when crossing into CHAOS.
+        // We detect crossing by storing a marker move in match_move (lightweight heuristic): if no prior CHAOS marker exists and phase is CHAOS, apply.
+        if (phase === "CHAOS") {
+            const lastChaos = await prisma.match_move.findFirst({ where: { matchId, pieceType: "CHAOS_MARK" }, orderBy: { createdAt: "desc" } });
+            if (!lastChaos) {
+                await prisma.$transaction(async (tx) => {
+                    // Triple each player's DE
+                    const players = await tx.match_player.findMany({ where: { matchId } });
+                    for (const p of players) {
+                        const nextDE = Math.min(60, (p.dreamEnergy ?? 0) * 3);
+                        await tx.match_player.update({ where: { id: p.id }, data: { dreamEnergy: nextDE } });
+                    }
+                    // Refresh active abilities: reset usedAbility to 0 for all pieces
+                    await tx.match_piece.updateMany({ where: { matchId }, data: { usedAbility: 0 } });
+                    // Drop a marker move so we don't repeat this
+                    await logMoveTx(tx as any, { match, me: (match.match_player as any[])[0] } as any, { fromX: -1, fromY: -1, toX: -1, toY: -1, pieceType: "CHAOS_MARK", specialAbilityUsed: 0, moveType: "ABILITY" });
+                });
+            }
+        }
         const clocks = await computeClocks(match);
         const danger = phase === "UNSTABLE" ? getDangerousSquare(match.id, match.turn) : null;
-        io.to(room).emit("match:update", { match, phase, clocks, dangerousSquare: danger });
+    io.to(room).emit("match:update", { match, phase, nextPhase, clocks, dangerousSquare: danger });
         // (Re)schedule the 3-minute per-turn idle timer for the current player
         await scheduleTurnTimer(match);
         // (Re)schedule a time-expire timer for the current player’s remaining main time
@@ -429,9 +454,15 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
     socket.on("match:state:request", async (_payload, ack?: (res: any) => void) => {
         const match = await fetchCurrentGameStateById(matchId);
         const phase = match ? getPhase(match.turn) : null;
+        const nextPhase = match && phase ? (() => {
+            if (phase === "CALM") return { name: "SHADOWS", inTurns: 5 - match.turn } as const;
+            if (phase === "SHADOWS") return { name: "UNSTABLE", inTurns: 41 - match.turn } as const;
+            if (phase === "UNSTABLE") return { name: "CHAOS", inTurns: 61 - match.turn } as const;
+            return null;
+        })() : null;
         const clocks = match ? await computeClocks(match) : null;
         const danger = match && phase === "UNSTABLE" ? getDangerousSquare(match.id, match.turn) : null;
-        ack?.({ ok: true, match, phase, clocks, dangerousSquare: danger });
+        ack?.({ ok: true, match, phase, nextPhase, clocks, dangerousSquare: danger });
     });
 
     socket.on("match:resign", async (_payload, ack?: (res: any) => void) => {

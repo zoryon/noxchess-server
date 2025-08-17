@@ -4,13 +4,14 @@ import { DbPiece } from "@/types/pieces-types.js";
 import { PIECES } from "@/constants/index.js";
 
 export function getPhase(turn: number) {
+    // Turns 1–4: CALM; 5–40: SHADOWS; 41–60: UNSTABLE; 61+: CHAOS
     if (turn <= 4) return "CALM" as const;
-    if (turn <= 20) return "SHADOWS" as const;
-    if (turn <= 30) return "UNSTABLE" as const;
+    if (turn <= 40) return "SHADOWS" as const;
+    if (turn <= 60) return "UNSTABLE" as const;
     return "CHAOS" as const;
 }
 
-// Deterministically compute a "dangerous" square for Unstable Ground (turn 21–30)
+// Deterministically compute a "dangerous" square for Unstable Ground (turns 41–60)
 // Uses a simple LCG seeded by matchId and turn so all sockets agree without DB state.
 export function getDangerousSquare(matchId: number, turn: number) {
     const seed = (matchId >>> 0) ^ ((turn + 0x9e3779b9) >>> 0);

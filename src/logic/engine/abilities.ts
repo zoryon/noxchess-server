@@ -29,6 +29,9 @@ export async function applyAbility(ctx: HandlerContext, attempt: AbilityAttempt,
     const owner = ctx.match.match_player.find(mp => mp.userId === piece.playerId);
     if (!owner || owner.id !== ctx.me.id) return { ok: false, error: "not_your_piece" };
 
+    // In CALM, abilities are disabled
+    if (ctx.phase === "CALM") return { ok: false, error: "abilities_disabled_in_calm" };
+
     // Passive: Field of Fear
     if (isBlockedByFieldOfFear(ctx, piece)) return { ok: false, error: "ability_blocked_by_field_of_fear" };
 
