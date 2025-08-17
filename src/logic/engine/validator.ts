@@ -509,36 +509,7 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
             }
         }
 
-        // Psychic Burst: if a Larva was armed and then captured a piece, immobilize adjacent enemies next enemy turn; charge DE now and consume the use.
-        if (piece.type === "PSYCHIC_LARVA" && isCapture) {
-            const st = (piece.status ?? {}) as any;
-            if (st.psychicBurstArmedTurn === ctx.match.turn) {
-                const cost = (PIECES[piece.type].activeAbility?.cost ?? 0);
-                await chargeDETx(tx, ctx, cost);
-
-                const oppColor = ctx.currentColor === "WHITE" ? "BLACK" : "WHITE";
-                const adj: Array<{ id: number; status: any } | null> = [];
-                const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
-                for (const [dx, dy] of dirs) {
-                    const ax = to.x + dx, ay = to.y + dy;
-                    if (ax < 0 || ax > 7 || ay < 0 || ay > 7) continue;
-                    const pid = ctx.board[ay][ax];
-                    if (pid == null) continue;
-                    const p = ctx.piecesById.get(pid)!;
-                    if (p.captured) continue;
-                    const owner = ctx.match.match_player.find(mp => mp.userId === p.playerId)!;
-                    if (owner.color !== oppColor) continue; // immobilize only enemy pieces
-                    const ns = mergeStatus(p.status || {}, { immobilizedOnTurn: ctx.match.turn + 1 });
-                    adj.push({ id: p.id, status: ns as any });
-                }
-                for (const upd of adj) {
-                    await tx.match_piece.update({ where: { id: upd!.id }, data: { status: upd!.status } });
-                }
-                // consume the one-time use and clear armed flag
-                const cleared = removeStatusKeys(st || {}, ["psychicBurstArmedTurn"]);
-                await tx.match_piece.update({ where: { id: piece.id }, data: { usedAbility: (piece.usedAbility ?? 0) + 1, status: cleared as any } });
-            }
-        }
+    // (Psychic Burst removed) No special on-capture effect for Larva.
 
         if (castle) {
             // Move king and rook, mark hasMoved

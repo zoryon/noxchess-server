@@ -111,11 +111,11 @@ export const PIECES: Record<string, PieceType> = {
         quantity: 8,
         defaultMovement: "pawn",
         activeAbility: {
-            name: "Psychic Burst",
+            name: "Whispering Swarm",
             trigger: "active",
-            cost: 1,
+            cost: 2,
             maxUses: 1,
-            description: "When capturing, enemy pieces adjacent to the captured piece cannot move next turn",
+            description: "If one friendly Psychic Larva has been captured by the enemy, you may summon one new Larva on an empty square horizontally adjacent to this piece.",
             // Implemented in engine/abilities.ts and enforced on capture in engine/validator.ts
             effect: () => {}
         },
