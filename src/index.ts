@@ -11,12 +11,35 @@ import { prisma } from "@/lib/prisma.js";
 dotenv.config();
 
 const app = express();
+// If running behind a proxy (NGINX/Render/Heroku), trust it so secure cookies and IPs work correctly
+app.set("trust proxy", true);
 const server = createServer(app);
+const allowedOriginsRaw = process.env.WEBSITE_URLS || process.env.WEBSITE_URL || "http://localhost:3000";
+const allowedOrigins = allowedOriginsRaw.split(",").map(s => s.trim()).filter(Boolean);
 const io = new Server(server, {
   cors: {
-    origin: process.env.WEBSITE_URL || "http://localhost:3000",
+    origin: (origin, cb) => {
+      // Allow same-origin or no origin (mobile apps, curl)
+      if (!origin) return cb(null, true);
+      try {
+        const u = new URL(origin);
+        const ok = allowedOrigins.some(o => {
+          try {
+            const a = new URL(o);
+            return a.hostname === u.hostname && (a.port ? a.port === u.port : true);
+          } catch { return o === origin; }
+        });
+        return cb(null, ok);
+      } catch {
+        return cb(null, false);
+      }
+    },
     credentials: true
-  }
+  },
+  // Tweak engine timeouts for real-world networks
+  pingInterval: 20_000,
+  pingTimeout: 25_000,
+  connectTimeout: 10_000,
 });
 
 // Simple health endpoint for Render/uptime checks
