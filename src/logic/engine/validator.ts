@@ -706,7 +706,16 @@ export async function applyPromotion(ctx: HandlerContext, larvaId: number, choic
                 producedId = created.id;
             }
             await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0 });
-            // Promotion doesn’t consume a turn; the move that reached last rank already ended the turn or not based on extra step
+            // End-of-turn: apply Camouflage updates for the acting player's Hunters, then increment turn
+            const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
+            const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
+            for (const h of hunters) {
+                const hs: any = h.status ?? {};
+                const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
+                const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
+                await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+            }
+            await incTurnTx(tx, ctx);
         });
         return { ok: true, broadcast: { promotion: "SUMMON", larvaId, resurrectedId: producedId, at: { x: larva.posX, y: larva.posY } } };
     } else {
@@ -725,6 +734,16 @@ export async function applyPromotion(ctx: HandlerContext, larvaId: number, choic
                 await tx.match_piece.create({ data: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "PSYCHIC_LARVA", posX: positions[i].x, posY: positions[i].y, captured: 0, usedAbility: 0 } as any });
             }
             await logMoveTx(tx, ctx, { fromX: larva.posX!, fromY: larva.posY!, toX: larva.posX!, toY: larva.posY!, pieceType: "PSYCHIC_LARVA", capturedPieceType: null, specialAbilityUsed: 0, moveType: "NORMAL" });
+            // End-of-turn: apply Camouflage updates and increment turn
+            const hunters = await tx.match_piece.findMany({ where: { matchId: ctx.match.id, playerId: ctx.me.userId, type: "SHADOW_HUNTER", captured: 0 } });
+            const until = ctx.match.turn + (ctx.phase === "CHAOS" ? 2 : 1);
+            for (const h of hunters) {
+                const hs: any = h.status ?? {};
+                const movedThisTurn = hs.lastMovedTurn === ctx.match.turn;
+                const ns = movedThisTurn ? removeStatusKeys(hs, ["camouflagedUntilTurn"]) : mergeStatus(hs, { camouflagedUntilTurn: until });
+                await tx.match_piece.update({ where: { id: h.id }, data: { status: ns as any } });
+            }
+            await incTurnTx(tx, ctx);
         });
         return { ok: true, broadcast: { promotion: "INFEST", larvaId, newLarvae: choice.positions } };
     }
