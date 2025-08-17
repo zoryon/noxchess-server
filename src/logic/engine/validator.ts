@@ -271,10 +271,10 @@ export async function applyMove(ctx: HandlerContext, attempt: MoveAttempt, userI
                 return { ok: false, error: "gateway_capture_restricted_to_larva" };
             }
         }
-        // Camouflage: a Shadow Hunter may be temporarily uncapturable if camouflaged (longer during CHAOS).
+    // Camouflage: a Shadow Hunter may be temporarily uncapturable by Larvas if camouflaged (longer during CHAOS).
         const tStatus: any = tp.status ?? {};
         const camoUntil: number | undefined = tStatus.camouflagedUntilTurn;
-        if (tp.type === "SHADOW_HUNTER" && camoUntil && ctx.match.turn <= camoUntil) {
+    if (tp.type === "SHADOW_HUNTER" && camoUntil && ctx.match.turn <= camoUntil && piece.type === "PSYCHIC_LARVA") {
             return { ok: false, error: "target_camouflaged" };
         }
     }
