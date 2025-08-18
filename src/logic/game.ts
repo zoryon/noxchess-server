@@ -95,6 +95,25 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                 });
                 idleCounts.set(countKey, nextCount);
                 io.to(room).emit("turn:idled", { userId: nowPlayer.userId, count: nextCount });
+                // After idling ends the turn, evaluate end conditions (stalemate/checkmate)
+                try {
+                    const updatedAfterIdle = await fetchCurrentGameStateById(matchId);
+                    if (updatedAfterIdle) {
+                        const ctx2 = buildHandlerContext(updatedAfterIdle);
+                        const end = evaluateEnd(ctx2);
+                        if (end.outcome) {
+                            if (end.outcome === "checkmate") {
+                                const winnerColor = end.winnerColor;
+                                const winner = updatedAfterIdle.match_player.find((p: any) => p.color === winnerColor);
+                                await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
+                                io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "checkmate" });
+                            } else if (end.outcome === "stalemate") {
+                                await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: null } });
+                                io.to(room).emit("match:finished", { matchId, winnerId: null, reason: "stalemate" });
+                            }
+                        }
+                    }
+                } catch {}
                 await emitState();
             } catch (e) {
                 // swallow
@@ -423,6 +442,25 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                 return;
             }
             io.to(room).emit("promotion:applied", res.broadcast);
+            // Evaluate end conditions after promotion (turn may have incremented)
+            try {
+                const updated = await fetchCurrentGameStateById(matchId);
+                if (updated) {
+                    const ctx2 = buildHandlerContext(updated);
+                    const end = evaluateEnd(ctx2);
+                    if (end.outcome) {
+                        if (end.outcome === "checkmate") {
+                            const winnerColor = end.winnerColor;
+                            const winner = updated.match_player.find((p: any) => p.color === winnerColor);
+                            await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: winner?.userId ?? null } });
+                            io.to(room).emit("match:finished", { matchId, winnerId: winner?.userId ?? null, reason: "checkmate" });
+                        } else if (end.outcome === "stalemate") {
+                            await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: null } });
+                            io.to(room).emit("match:finished", { matchId, winnerId: null, reason: "stalemate" });
+                        }
+                    }
+                }
+            } catch {}
             await emitState();
             ack?.({ ok: true });
         } catch (e: any) {
@@ -481,6 +519,44 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
 
             io.to(room).emit("match:finished", { matchId, winnerId: opponent?.userId ?? null, reason: "resign" });
             ack?.({ ok: true, matchId });
+        } catch (e: any) {
+            ack?.({ ok: false, error: e.message || "unknown_error" });
+        }
+    });
+
+    // Claim a draw by the 50-move rule (25 moves per side without any capture)
+    socket.on("match:claim-draw", async (_payload, ack?: (res: any) => void) => {
+        try {
+            const match = await fetchCurrentGameStateById(matchId);
+            if (!match) throw new Error("match_not_found");
+            if (match.status === "FINISHED") { ack?.({ ok: false, error: "match_already_finished" }); return; }
+
+            // Must be a participant in this match
+            const userId: number | undefined = socket?.data?.user?.userId;
+            if (!userId) throw new Error("unauthorized");
+            const isPlayer = match.match_player.some((p: any) => p.userId === userId);
+            if (!isPlayer) throw new Error("not_in_match");
+
+            // Fetch the last 50 half-moves and ensure none had a capture
+            const recent = await prisma.match_move.findMany({
+                where: { matchId },
+                orderBy: { createdAt: "desc" },
+                take: 50,
+            });
+            if (recent.length < 50) {
+                ack?.({ ok: false, error: "not_eligible" });
+                return;
+            }
+            const anyCapture = recent.some(mv => mv.capturedPieceType != null);
+            if (anyCapture) {
+                ack?.({ ok: false, error: "not_eligible" });
+                return;
+            }
+
+            // Eligible: finalize as a draw
+            await prisma.match.update({ where: { id: matchId }, data: { status: "FINISHED", winnerId: null } });
+            io.to(room).emit("match:finished", { matchId, winnerId: null, reason: "fifty-move-rule" });
+            ack?.({ ok: true });
         } catch (e: any) {
             ack?.({ ok: false, error: e.message || "unknown_error" });
         }
