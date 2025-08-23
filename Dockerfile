@@ -43,7 +43,12 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app ./
 EXPOSE 3001
 USER node
-CMD ["node", "src/index.ts"]
+# Use tsx in production too to run TS directly; fallback to node if needed
+CMD ["sh", "-c", "\
+if [ -x ./node_modules/.bin/tsx ]; then exec ./node_modules/.bin/tsx src/index.ts; \
+else exec node --enable-source-maps src/index.ts; \
+fi \
+"]
 
 # ------------------------------
 # Development runtime

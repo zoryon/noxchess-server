@@ -10,12 +10,25 @@ import { prisma } from "@/lib/prisma.js";
 
 dotenv.config();
 
+function cleanEnvString(val?: string | null): string | undefined {
+  if (val == null) return undefined;
+  // Trim and strip surrounding quotes if present
+  const t = val.trim();
+  if ((t.startsWith("\"") && t.endsWith("\"")) || (t.startsWith("'") && t.endsWith("'"))) {
+    return t.slice(1, -1);
+  }
+  return t;
+}
+
 const app = express();
 // If running behind a proxy (NGINX/Render/Heroku), trust it so secure cookies and IPs work correctly
 app.set("trust proxy", true);
 const server = createServer(app);
-const allowedOriginsRaw = process.env.WEBSITE_URLS || process.env.WEBSITE_URL || "http://localhost:3000";
-const allowedOrigins = allowedOriginsRaw.split(",").map(s => s.trim()).filter(Boolean);
+const allowedOriginsRaw = cleanEnvString(process.env.WEBSITE_URLS) || cleanEnvString(process.env.WEBSITE_URL) || "http://localhost:3000";
+const allowedOrigins = allowedOriginsRaw
+  .split(",")
+  .map(s => cleanEnvString(s) || "")
+  .filter(Boolean);
 const io = new Server(server, {
   cors: {
     origin: (origin, cb) => {
@@ -137,7 +150,11 @@ io.on("connection", async (socket) => {
   });
 });
 
-const port = Number(process.env.WEBSOCKET_PORT ?? 3001);
+const rawPort = cleanEnvString(process.env.WEBSOCKET_PORT);
+let port = Number(rawPort ?? 3001);
+if (!Number.isFinite(port) || port < 0 || port > 65535) {
+  port = 3001;
+}
 server.listen(port, () => {
   console.log(`WS server running on port ${port}`);
 });
