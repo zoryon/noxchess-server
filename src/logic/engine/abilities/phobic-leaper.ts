@@ -32,7 +32,7 @@ const terrorLeap: AbilityHandler = async (ctx: HandlerContext, pieceId: number, 
         if (destOwner.color === ctx.currentColor) return { ok: false, error: "cannot_capture_ally" } as const;
         // Terror Leap cannot capture the Phantom Matriarch nor the Sleepless Eye.
         if (destPiece.type === "PHANTOM_MATRIARCH" || destPiece.type === "SLEEPLESS_EYE") {
-            return { ok: false, error: "cannot_capture_king_or_matriarch_with_terror_leap" } as const;
+            return { ok: false, error: "cannot_capture_sleepless_or_matriarch_with_terror_leap" } as const;
         }
     }
 
