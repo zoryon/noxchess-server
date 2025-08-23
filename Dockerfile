@@ -41,7 +41,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app ./
-EXPOSE 3000
+EXPOSE 3001
 USER node
 CMD ["node", "src/index.ts"]
 
@@ -59,7 +59,7 @@ RUN set -eux; \
   else echo "No lockfile found for dev install" >&2; exit 1; \
   fi
 COPY . .
-EXPOSE 3000
+EXPOSE 3001
 CMD [ "sh", "-c", "\
 if [ -f pnpm-lock.yaml ]; then corepack enable pnpm && exec pnpm run dev; \
 elif [ -f yarn.lock ]; then exec yarn dev; \
