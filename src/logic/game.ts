@@ -113,7 +113,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                             }
                         }
                     }
-                } catch {}
+                } catch { }
                 await emitState();
             } catch (e) {
                 // swallow
@@ -189,7 +189,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
         }
         const clocks = await computeClocks(match);
         const danger = phase === "UNSTABLE" ? getDangerousSquare(match.id, match.turn) : null;
-    io.to(room).emit("match:update", { match, phase, nextPhase, clocks, dangerousSquare: danger });
+        io.to(room).emit("match:update", { match, phase, nextPhase, clocks, dangerousSquare: danger });
         // (Re)schedule the 3-minute per-turn idle timer for the current player
         await scheduleTurnTimer(match);
         // (Re)schedule a time-expire timer for the current player’s remaining main time
@@ -460,7 +460,7 @@ export async function deployGameHandler(io: Server, socket: Socket, matchId: num
                         }
                     }
                 }
-            } catch {}
+            } catch { }
             await emitState();
             ack?.({ ok: true });
         } catch (e: any) {
