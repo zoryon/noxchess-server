@@ -144,3 +144,18 @@ CREATE TABLE `friendship` (
     CONSTRAINT `friendship_userA_fk` FOREIGN KEY (`userAId`) REFERENCES `user` (`id`) ON DELETE CASCADE,
     CONSTRAINT `friendship_userB_fk` FOREIGN KEY (`userBId`) REFERENCES `user` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Friend challenge table for directed invites
+CREATE TABLE `friend_challenge` (
+    `id` int NOT NULL AUTO_INCREMENT,
+    `fromUserId` int NOT NULL,
+    `toUserId` int NOT NULL,
+    `status` ENUM('WAITING','ACCEPTED','DECLINED','CANCELLED','EXPIRED') NOT NULL DEFAULT 'WAITING',
+    `createdAt` datetime DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt` datetime DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `fromUserId` (`fromUserId`),
+    KEY `toUserId` (`toUserId`),
+    CONSTRAINT `friend_challenge_from_fk` FOREIGN KEY (`fromUserId`) REFERENCES `user` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `friend_challenge_to_fk` FOREIGN KEY (`toUserId`) REFERENCES `user` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

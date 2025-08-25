@@ -4,7 +4,7 @@ import { Server } from "socket.io";
 import dotenv from "dotenv";
 
 import { jwtMiddleware } from "@/auth/jwt-middleware.js";
-import { createMatch } from "@/logic/match.js";
+import { createMatch, createFriendChallenge, cancelFriendChallenge, acceptFriendChallenge, declineFriendChallenge } from "@/logic/match.js";
 import { cancelWaitingQueue } from "@/logic/queue.js";
 import { prisma } from "@/lib/prisma.js";
 
@@ -65,6 +65,8 @@ io.use(jwtMiddleware);
 io.on("connection", async (socket) => {
   const userId = socket.data.user.userId as number;
   console.log(`User connected: ${userId}`);
+  // Join a per-user room so notifications reach all tabs/devices for this user
+  try { socket.join(`user:${userId}`); } catch { }
 
   // If this socket disconnects at any point,
   // cancel its queue entry if it was still WAITING.
@@ -73,6 +75,22 @@ io.on("connection", async (socket) => {
       await cancelWaitingQueue(userId);
     } catch (e) {
       console.warn("failed to cancel waiting queue on disconnect", e);
+    }
+    try {
+      // Cancel any pending outgoing challenges if the inviter disconnects and notify receivers
+      const pending = await prisma.friend_challenge.findMany({ where: { fromUserId: userId, status: "WAITING" }, select: { id: true, toUserId: true } });
+      if (pending.length) {
+        await prisma.friend_challenge.updateMany({ where: { fromUserId: userId, status: "WAITING" }, data: { status: "CANCELLED" } });
+        try {
+          const sockets = await io.fetchSockets();
+          for (const ch of pending) {
+            const target = sockets.find(s => s.data.user.userId === ch.toUserId);
+            if (target) target.emit("challenge:cancelled", { id: ch.id });
+          }
+        } catch { }
+      }
+    } catch (e) {
+      console.warn("failed to cancel pending challenges on disconnect", e);
     }
   });
 
@@ -84,7 +102,7 @@ io.on("connection", async (socket) => {
     });
     if (existing) {
       const room = `match:${existing.id}`;
-      try { socket.join(room); } catch {}
+      try { socket.join(room); } catch { }
       await import("@/logic/game.js").then(({ deployGameHandler }) => deployGameHandler(io, socket, existing.id));
       // Optional hint to the reconnecting client
       socket.emit("match:resume", existing);
@@ -97,6 +115,12 @@ io.on("connection", async (socket) => {
   // Queue: only start when client explicitly asks
   socket.on("match:queue", async () => {
     try {
+      // If user has a pending outgoing challenge, they cannot queue for random or other matches
+      const pending = await prisma.friend_challenge.findFirst({ where: { fromUserId: userId, status: "WAITING" }, select: { id: true, toUserId: true } });
+      if (pending) {
+        socket.emit("challenge:waiting", { id: pending.id, toUserId: pending.toUserId });
+        return;
+      }
       const { gameState, opponentId, oppSocket } = await createMatch(io, socket);
 
       // If no opponent was found yet, the createMatch flow already emitted
@@ -106,29 +130,26 @@ io.on("connection", async (socket) => {
 
       if (oppSocket) {
         const room = `match:${gameState.id}`;
-        // Join both sockets to the room atomically and emit directly to both ids to avoid race conditions
-        try {
-          // Join both players to the match room
-          io.in([socket.id, oppSocket.id]).socketsJoin(room);
-        } catch {}
+        // Identify participants
+        const white = gameState.match_player.find(p => p.color === "WHITE")?.userId;
+        const black = gameState.match_player.find(p => p.color === "BLACK")?.userId;
+        const rooms = [white, black].filter(Boolean).map(id => `user:${id}`);
+        try { io.in(rooms).socketsJoin(room); } catch { }
 
-        // Deploy game handler for BOTH players so they can interact immediately without reconnecting
+        // Deploy game handlers for all sockets of both users
         try {
           await import("@/logic/game.js").then(async ({ deployGameHandler }) => {
-            // Deploy for the initiating socket (already a real Socket)
-            await deployGameHandler(io, socket, gameState.id);
-            // Try to fetch the real Socket instance for the opponent and deploy as well
-            const oppReal = io.of("/").sockets.get(oppSocket.id as string);
-            if (oppReal) {
-              await deployGameHandler(io, oppReal, gameState.id);
+            const sockets = await io.fetchSockets();
+            const participants = sockets.filter(s => [white, black].includes(s.data.user.userId));
+            for (const rs of participants) {
+              const real = io.of("/").sockets.get(rs.id as string);
+              if (real) await deployGameHandler(io, real, gameState.id);
             }
           });
-        } catch (e) {
-          console.warn("failed to deploy game handlers for both players", e);
-        }
+        } catch (e) { console.warn("failed to deploy to all participants", e); }
 
-        // Emit start event directly to both sockets to ensure both clients navigate
-        io.to([socket.id, oppSocket.id]).emit("match:start", gameState);
+        // Emit start to all tabs for both users
+        io.to(rooms).emit("match:start", gameState);
       } else {
         console.warn(`Opponent socket for userId ${opponentId} not found.`);
         socket.emit("error:opponent_disconnected");
@@ -147,6 +168,81 @@ io.on("connection", async (socket) => {
     } catch (e) {
       console.warn("failed to cancel queue by request", e);
     }
+  });
+
+  // Friend challenge: create
+  socket.on("challenge:create", async (toUserId: number) => {
+    const fromUserId = userId;
+    try {
+      const ch = await createFriendChallenge(fromUserId, toUserId);
+      // Ensure inviter is not in the random queue anymore
+      try { await cancelWaitingQueue(fromUserId); } catch { }
+      // Notify sender
+      socket.emit("challenge:created", ch);
+      // Notify receiver if online
+      try { io.to(`user:${toUserId}`).emit("challenge:incoming", { ...ch, fromUserId, toUserId }); } catch { }
+    } catch (e: any) {
+      socket.emit("challenge:error", { message: e?.message || "failed" });
+    }
+  });
+
+  // Friend challenge: cancel (by either party)
+  socket.on("challenge:cancel", async (challengeId: number) => {
+    try {
+      await cancelFriendChallenge(userId, challengeId);
+      socket.emit("challenge:cancelled", { id: challengeId });
+      // Notify the other party if online
+      try {
+        const ch = await prisma.friend_challenge.findUnique({ where: { id: challengeId } });
+        if (ch) {
+          const otherUserId = ch.fromUserId === userId ? ch.toUserId : ch.fromUserId;
+          io.to(`user:${otherUserId}`).emit("challenge:cancelled", { id: challengeId });
+        }
+      } catch { }
+    } catch { }
+  });
+
+  // Friend challenge: accept by recipient -> start a direct match
+  socket.on("challenge:accept", async (challengeId: number) => {
+    try {
+      const game = await acceptFriendChallenge(io, challengeId, userId);
+      if (!game) return socket.emit("challenge:error", { message: "invalid_challenge" });
+
+      const room = `match:${game.id}`;
+      const users = game.match_player.map(p => p.userId).filter(Boolean) as number[];
+      const userRooms = users.map(id => `user:${id}`);
+      try { io.in(userRooms).socketsJoin(room); } catch { }
+
+      // Deploy handlers for both players
+      try {
+        await import("@/logic/game.js").then(async ({ deployGameHandler }) => {
+          const sockets = await io.fetchSockets();
+          const participants = sockets.filter(s => users.includes(s.data.user.userId));
+          for (const rs of participants) {
+            const real = io.of("/").sockets.get(rs.id as string);
+            if (real) await deployGameHandler(io, real, game.id);
+          }
+        });
+      } catch (e) { console.warn("deploy after challenge error", e); }
+
+      // Broadcast start to all tabs for both participants
+      io.to(userRooms).emit("match:start", game);
+    } catch (e) {
+      socket.emit("challenge:error", { message: "accept_failed" });
+    }
+  });
+
+  // Friend challenge: decline by recipient
+  socket.on("challenge:decline", async (challengeId: number) => {
+    try {
+      await declineFriendChallenge(challengeId, userId);
+      socket.emit("challenge:declined", { id: challengeId });
+      // Notify sender if online
+      try {
+        const ch = await prisma.friend_challenge.findUnique({ where: { id: challengeId } });
+        if (ch) io.to(`user:${ch.fromUserId}`).emit("challenge:declined", { id: challengeId });
+      } catch { }
+    } catch { }
   });
 });
 
